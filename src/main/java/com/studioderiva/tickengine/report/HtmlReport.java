@@ -34,7 +34,13 @@ public final class HtmlReport {
 	 */
 	public static CompletableFuture<Path> writeAsync(MinecraftServer server, ProfileSnapshot snapshot) {
 		String html = render(server, snapshot);
-		Path directory = server.getServerDirectory().resolve(TickEngineConfig.reportDirectory);
+		Path serverDirectory = server.getServerDirectory().toAbsolutePath().normalize();
+		Path directory = serverDirectory.resolve(TickEngineConfig.reportDirectory).normalize();
+		if (!directory.startsWith(serverDirectory)) {
+			// The config already rejects such paths; this guards against anything that slips through.
+			return CompletableFuture.failedFuture(new IOException("Report directory is outside the server folder: "
+				+ TickEngineConfig.reportDirectory));
+		}
 		Path file = directory.resolve("tickengine-" + FILE_TIME.format(Instant.ofEpochMilli(snapshot.startMillis)) + ".html");
 		return CompletableFuture.supplyAsync(() -> {
 			try {

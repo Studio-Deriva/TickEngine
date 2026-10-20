@@ -81,8 +81,12 @@ Players are never throttled. Around the nearest player:
 
 - Throttled ticks follow each entity's own tick counter, so logic like "every 40 ticks" (item merging)
   keeps working with intervals 2, 4, 5, 10 or 20, and the work is spread over different ticks.
+- When a throttled mob gets its AI turn, it always runs a full goal selection, so far mobs still start
+  and stop behaviours (eating grass, picking targets, fleeing).
 - Never throttled by default: projectiles, entities carrying passengers, bosses (`c:bosses` tag), mobs in
   combat (hit by a player or mob in the last `combatSeconds`, or with an attack target).
+- Default rules: Elder Guardians and Wardens are never throttled, because their area effects (mining
+  fatigue, darkness) only fire on specific ticks that a throttled AI turn would miss.
 - Ticked normally while it lasts: falling, in lava, in water (except water mobs that breathe there),
   the first `newEntitySeconds` after spawning or loading, animals in love and babies.
 - Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
@@ -92,6 +96,7 @@ Players are never throttled. Around the nearest player:
 
 Every `autoTuning.decisionSeconds` (10) TickEngine looks at the average MSPT over that time. Above
 `raiseAboveMspt` (45 ms) it tightens one level; below `lowerBelowMspt` (30 ms) it relaxes one level.
+`lowerBelowMspt` must be below `raiseAboveMspt`; commands reject values that break this.
 Levels tighten in this order, least visible first, and relax in reverse:
 
 1. default throttle intervals, through safe values only: 4, 5, 10, 20 (explicit rules are never changed)

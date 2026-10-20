@@ -1,6 +1,8 @@
 package com.studioderiva.tickengine.mixin;
 
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Mob;
@@ -15,6 +17,9 @@ import org.spongepowered.asm.mixin.injection.At;
  * {@code customServerAiStep}, where brain-based mobs like villagers think) when
  * {@link EntityThrottle} throttles this mob's AI. Movement, look and jump controls still run,
  * so the mob keeps moving toward its last target smoothly.
+ *
+ * <p>When a throttled mob runs its AI on its turn, the partial goal update is replaced by a
+ * full goal selection (see {@link EntityThrottle#isThrottledRun}).
  */
 @Mixin(Mob.class)
 abstract class MobMixin {
@@ -24,10 +29,18 @@ abstract class MobMixin {
 		return !EntityThrottle.isAiSkipped((Mob) (Object) this);
 	}
 
-	@WrapWithCondition(method = "serverAiStep",
+	@WrapOperation(method = "serverAiStep",
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/ai/goal/GoalSelector;tickRunningGoals(Z)V"))
-	private boolean tickengine$runningGoals(GoalSelector selector, boolean tickAll) {
-		return !EntityThrottle.isAiSkipped((Mob) (Object) this);
+	private void tickengine$runningGoals(GoalSelector selector, boolean tickAll, Operation<Void> original) {
+		Mob mob = (Mob) (Object) this;
+		if (EntityThrottle.isAiSkipped(mob)) {
+			return;
+		}
+		if (EntityThrottle.isThrottledRun(mob)) {
+			selector.tick();
+			return;
+		}
+		original.call(selector, tickAll);
 	}
 
 	@WrapWithCondition(method = "serverAiStep",

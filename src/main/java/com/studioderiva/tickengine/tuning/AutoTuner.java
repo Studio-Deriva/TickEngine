@@ -95,7 +95,9 @@ public final class AutoTuner {
 		}
 		if (lastAverageMspt > TickEngineConfig.raiseAboveMspt && level < maxLevel) {
 			setLevel(level + 1, "average MSPT " + format(lastAverageMspt) + " ms > " + TickEngineConfig.raiseAboveMspt);
-		} else if (lastAverageMspt < TickEngineConfig.lowerBelowMspt && level > 0) {
+		} else if (lastAverageMspt < TickEngineConfig.lowerBelowMspt && level > 0
+			// Inconsistent thresholds would raise and lower on alternate decisions forever.
+			&& TickEngineConfig.lowerBelowMspt < TickEngineConfig.raiseAboveMspt) {
 			setLevel(level - 1, "average MSPT " + format(lastAverageMspt) + " ms < " + TickEngineConfig.lowerBelowMspt);
 		}
 	}

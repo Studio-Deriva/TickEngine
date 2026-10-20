@@ -30,6 +30,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.DimensionArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -37,6 +38,7 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.permissions.PermissionLevel;
 
 /**
@@ -66,7 +68,7 @@ public final class TickEngineCommand {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
 		dispatcher.register(Commands.literal("tickengine")
 			.requires(permission("status").or(permission("top")).or(permission("profile")).or(permission("config")))
-			.executes(TickEngineCommand::status)
+			.executes(TickEngineCommand::root)
 			.then(Commands.literal("status")
 				.requires(permission("status"))
 				.executes(TickEngineCommand::status))
@@ -118,6 +120,22 @@ public final class TickEngineCommand {
 	}
 
 	// --- status ---
+
+	/** Bare /tickengine: status for those allowed to see it, otherwise the subcommands they can use. */
+	private static int root(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		if (permission("status").test(source)) {
+			return status(context);
+		}
+		String available = Stream.of("top", "profile", "config")
+			.filter(name -> permission(name).test(source))
+			.map(name -> "/tickengine " + name)
+			.reduce((a, b) -> a + ", " + b)
+			.orElse("none");
+		source.sendSuccess(() -> header("TickEngine")
+			.append(Component.literal(" Available: " + available).withStyle(ChatFormatting.GRAY)), false);
+		return 1;
+	}
 
 	private static int status(CommandContext<CommandSourceStack> context) {
 		CommandSourceStack source = context.getSource();
@@ -289,7 +307,8 @@ public final class TickEngineCommand {
 				String dimension = entry.worstDimension().identifier().toString();
 				String coordinates = entry.worstPos().getX() + " " + entry.worstPos().getY() + " " + entry.worstPos().getZ();
 				// Land on top of a block entity instead of inside it, where a player would suffocate.
-				int landingY = entry.worstPos().getY() + (category == ProfileSnapshot.Category.BLOCK_ENTITY ? 1 : 0);
+				BlockPos start = category == ProfileSnapshot.Category.BLOCK_ENTITY ? entry.worstPos().above() : entry.worstPos();
+				int landingY = landingY(source.getServer().getLevel(entry.worstDimension()), start);
 				String landing = entry.worstPos().getX() + " " + landingY + " " + entry.worstPos().getZ();
 				name = name.withStyle(style -> style
 					.withClickEvent(new ClickEvent.RunCommand("/execute in " + dimension + " run tp @s " + landing))
@@ -305,6 +324,28 @@ public final class TickEngineCommand {
 				.append(Component.literal(" x" + format(perTick)).withStyle(ChatFormatting.DARK_GRAY))
 				.append(timing(snapshot, entry.totalNanos())), false);
 		}
+	}
+
+	/**
+	 * First height at or above {@code start} with two free blocks for the player, checked when the
+	 * list is printed. Falls back to {@code start} when nothing free is found nearby.
+	 */
+	private static int landingY(ServerLevel level, BlockPos start) {
+		if (level == null) {
+			return start.getY();
+		}
+		BlockPos.MutableBlockPos pos = start.mutable();
+		int top = Math.min(level.getMaxY(), start.getY() + 64);
+		for (int y = start.getY(); y < top; y++) {
+			if (isFree(level, pos.setY(y)) && isFree(level, pos.setY(y + 1))) {
+				return y;
+			}
+		}
+		return start.getY();
+	}
+
+	private static boolean isFree(ServerLevel level, BlockPos pos) {
+		return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
 	}
 
 	private static MutableComponent timing(ProfileSnapshot snapshot, long totalNanos) {
@@ -407,9 +448,16 @@ public final class TickEngineCommand {
 		if (option == null) {
 			return 0;
 		}
+		String previous = option.format();
 		String error = option.set(StringArgumentType.getString(context, "value"));
 		if (error != null) {
 			source.sendFailure(Component.literal(option.key + ": " + error));
+			return 0;
+		}
+		String inconsistency = TickEngineConfig.checkConsistency();
+		if (inconsistency != null) {
+			option.set(previous);
+			source.sendFailure(Component.literal(inconsistency));
 			return 0;
 		}
 		TickEngineConfig.changed();
@@ -422,10 +470,20 @@ public final class TickEngineCommand {
 	}
 
 	private static int configReload(CommandContext<CommandSourceStack> context) {
-		TickEngineConfig.load();
+		boolean loaded = TickEngineConfig.load();
 		ServerCoreCompat.refresh();
+		if (!loaded) {
+			context.getSource().sendFailure(Component.literal("The config file has a syntax error and was not loaded;"
+				+ " the previous settings stay in use. See the server log for the position."));
+			return 0;
+		}
 		context.getSource().sendSuccess(() -> Component.literal("TickEngine config reloaded.")
 			.withStyle(ChatFormatting.GREEN), true);
+		String inconsistency = TickEngineConfig.checkConsistency();
+		if (inconsistency != null) {
+			context.getSource().sendSuccess(() -> Component.literal(inconsistency + " Auto-tuning will not relax until"
+				+ " this is fixed.").withStyle(ChatFormatting.YELLOW), false);
+		}
 		return 1;
 	}
 

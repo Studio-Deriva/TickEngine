@@ -31,8 +31,9 @@ abstract class ServerLevelMixin {
 			EntityThrottle.minimalTick(entity);
 			return;
 		}
-		if (mode == EntityThrottle.Mode.AI_SKIPPED) {
-			EntityThrottle.setAiSkipped(entity);
+		boolean marked = mode == EntityThrottle.Mode.AI_SKIPPED || mode == EntityThrottle.Mode.THROTTLED_FULL;
+		if (marked) {
+			EntityThrottle.setCurrent(entity, mode);
 		}
 		try {
 			if (!TickProfiler.sampling) {
@@ -46,8 +47,8 @@ abstract class ServerLevelMixin {
 				TickProfiler.recordEntity(entity, System.nanoTime() - start);
 			}
 		} finally {
-			if (mode == EntityThrottle.Mode.AI_SKIPPED) {
-				EntityThrottle.setAiSkipped(null);
+			if (marked) {
+				EntityThrottle.setCurrent(null, EntityThrottle.Mode.FULL);
 			}
 		}
 	}

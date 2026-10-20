@@ -36,6 +36,8 @@ import net.minecraft.world.level.Level;
  *
  * <ul>
  *   <li>{@link Mode#FULL}: normal tick.</li>
+ *   <li>{@link Mode#THROTTLED_FULL}: normal tick of a throttled entity on its turn. Mobs run a
+ *   full goal selection, see {@link #isThrottledRun}.</li>
  *   <li>{@link Mode#AI_SKIPPED}: normal tick, but the AI parts of {@code Mob.serverAiStep}
  *   (sensing, goals, navigation, brain) are skipped this tick.</li>
  *   <li>{@link Mode#MINIMAL}: the tick is replaced by {@link #minimalTick}, which only
@@ -47,7 +49,7 @@ import net.minecraft.world.level.Level;
  * This also spreads the work of different entities over different ticks. Server thread only.
  */
 public final class EntityThrottle {
-	public enum Mode { FULL, AI_SKIPPED, MINIMAL }
+	public enum Mode { FULL, THROTTLED_FULL, AI_SKIPPED, MINIMAL }
 
 	private static final byte FAR = Byte.MAX_VALUE;
 	/** Chebyshev chunk distance to the nearest player, for chunks up to aiRadiusChunks. */
@@ -60,8 +62,9 @@ public final class EntityThrottle {
 	private static final Map<ResourceKey<Level>, Map<EntityType<?>, ThrottleRules.EntityIntervals>> intervals = new HashMap<>();
 	private static int intervalsVersion = -1;
 
-	/** The entity whose AI is skipped in the tick currently running, if any. */
-	private static Entity aiSkippedEntity;
+	/** The entity whose tick is currently running with a throttled mode, if any. */
+	private static Entity currentEntity;
+	private static Mode currentMode = Mode.FULL;
 
 	// Statistics for the last full second (20 game ticks), shown by /tickengine status.
 	private static long fullNow;
@@ -136,11 +139,20 @@ public final class EntityThrottle {
 		if (interval > 1 && forcedChunks.contains(chunk)) {
 			interval = Math.min(interval, TickEngineConfig.entityForcedChunkMaxInterval);
 		}
-		if (interval <= 1 || entity.tickCount % interval == 0) {
+		if (interval <= 1) {
 			fullNow++;
 			return Mode.FULL;
 		}
+		if (entity.tickCount % interval == 0) {
+			fullNow++;
+			return Mode.THROTTLED_FULL;
+		}
 		if (aiZone) {
+			if (!(entity instanceof Mob)) {
+				// Only mobs have AI to skip: anything else ticks normally in the AI zone.
+				fullNow++;
+				return Mode.FULL;
+			}
 			aiSkippedNow++;
 			return Mode.AI_SKIPPED;
 		}
@@ -214,13 +226,24 @@ public final class EntityThrottle {
 		return rule;
 	}
 
-	/** Marks the entity whose AI must be skipped while its tick runs; null to clear. */
-	public static void setAiSkipped(Entity entity) {
-		aiSkippedEntity = entity;
+	/** Marks the entity whose tick is about to run with the given mode; null to clear. */
+	public static void setCurrent(Entity entity, Mode mode) {
+		currentEntity = entity;
+		currentMode = entity == null ? Mode.FULL : mode;
 	}
 
 	public static boolean isAiSkipped(Entity entity) {
-		return aiSkippedEntity == entity;
+		return currentEntity == entity && currentMode == Mode.AI_SKIPPED;
+	}
+
+	/**
+	 * True while a throttled mob runs its AI on its turn. Vanilla alternates a full goal
+	 * selection and a running-goals-only update on the parity of {@code tickCount + id}; since
+	 * throttled turns fall on multiples of the interval, an even interval would leave mobs with
+	 * an odd id on the partial update forever, so they would never start or stop a goal.
+	 */
+	public static boolean isThrottledRun(Entity entity) {
+		return currentEntity == entity && currentMode == Mode.THROTTLED_FULL;
 	}
 
 	/**
@@ -280,7 +303,7 @@ public final class EntityThrottle {
 
 	public static void reset() {
 		preparedLevel = null;
-		aiSkippedEntity = null;
+		setCurrent(null, Mode.FULL);
 		playerDistance.clear();
 		forcedChunks = LongSet.of();
 		intervals.clear();

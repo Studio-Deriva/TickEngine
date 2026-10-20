@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -130,8 +131,8 @@ public final class TickEngineConfig {
 			"How many entries '/tickengine top' prints per list. Range: 1-50.",
 			1, 50, () -> chatTopEntries, v -> chatTopEntries = v));
 		register(Option.string("output.reportDirectory",
-			"Folder for HTML reports, relative to the server folder.",
-			() -> reportDirectory, v -> reportDirectory = v));
+			"Folder for HTML reports, relative to the server folder. Must stay inside the server folder.",
+			() -> reportDirectory, v -> reportDirectory = v, TickEngineConfig::checkReportDirectory));
 		register(Option.integer("permissions.commandOpLevel",
 			"Operator level required for /tickengine when no permissions mod (e.g. LuckPerms) is installed.\n"
 				+ "With LuckPerms use the nodes tickengine.status, tickengine.top, tickengine.profile,\n"
@@ -295,6 +296,11 @@ public final class TickEngineConfig {
 		// Moving pistons must finish their animation on time, or flying machines and door
 		// mechanisms break when nobody is nearby.
 		BLOCK_ENTITY_RULES.set("minecraft:piston", 1, null);
+		// Their area effects (mining fatigue within 50 blocks, darkness within 20) fire only when
+		// (tickCount + id) is a multiple of 1200 or 120 during the AI step, which a throttled
+		// turn never reaches for most ids.
+		ENTITY_RULES.set("minecraft:elder_guardian", new ThrottleRules.EntityIntervals(1, 1), null);
+		ENTITY_RULES.set("minecraft:warden", new ThrottleRules.EntityIntervals(1, 1), null);
 	}
 
 	private TickEngineConfig() {
@@ -319,8 +325,34 @@ public final class TickEngineConfig {
 		version++;
 	}
 
-	/** Loads the file, keeping defaults for missing or invalid values, then rewrites it. */
-	public static void load() {
+	/** Returns an error message when the path could leave the server folder, or null when it is valid. */
+	private static String checkReportDirectory(String value) {
+		try {
+			Path path = Path.of(value).normalize();
+			if (path.isAbsolute() || path.startsWith("..")) {
+				return "must be a folder inside the server folder.";
+			}
+		} catch (InvalidPathException e) {
+			return "is not a valid path.";
+		}
+		return null;
+	}
+
+	/** Returns an error message when options are inconsistent with each other, or null when they are valid. */
+	public static String checkConsistency() {
+		if (lowerBelowMspt >= raiseAboveMspt) {
+			return "autoTuning.lowerBelowMspt (" + lowerBelowMspt + ") must be below autoTuning.raiseAboveMspt ("
+				+ raiseAboveMspt + ").";
+		}
+		return null;
+	}
+
+	/**
+	 * Loads the file, keeping the current values for missing or invalid ones, then rewrites it.
+	 * When the file cannot be parsed at all it is left untouched, so a typo never wipes the
+	 * user's settings. Returns false in that case.
+	 */
+	public static boolean load() {
 		if (Files.exists(FILE)) {
 			try (Reader reader = Files.newBufferedReader(FILE, StandardCharsets.UTF_8)) {
 				JsonReader json = new JsonReader(reader);
@@ -344,11 +376,19 @@ public final class TickEngineConfig {
 					ENTITY_RULES.read(entities.getAsJsonObject());
 				}
 			} catch (Exception e) {
-				TickEngine.LOGGER.error("Could not read {}, using defaults for unreadable values", FILE, e);
+				TickEngine.LOGGER.error("Could not read {}: the file was NOT changed and the settings already in use (defaults at startup)"
+					+ " stay. Fix the error and run '/tickengine config reload'.", FILE, e);
+				version++;
+				return false;
 			}
+		}
+		String inconsistency = checkConsistency();
+		if (inconsistency != null) {
+			TickEngine.LOGGER.warn("Config: {} Auto-tuning will not relax until this is fixed.", inconsistency);
 		}
 		version++;
 		save();
+		return true;
 	}
 
 	public static void save() {
@@ -451,9 +491,10 @@ public final class TickEngineConfig {
 			}, value -> value < min || value > max ? "must be between " + min + " and " + max + "." : null);
 		}
 
-		static Option<String> string(String key, String comment, Supplier<String> getter, Consumer<String> setter) {
+		static Option<String> string(String key, String comment, Supplier<String> getter, Consumer<String> setter,
+			Function<String, String> validator) {
 			return new Option<>(key, comment, getter, setter, text -> text,
-				value -> value.isBlank() ? "must not be empty." : null);
+				value -> value.isBlank() ? "must not be empty." : validator.apply(value));
 		}
 
 		public String format() {
