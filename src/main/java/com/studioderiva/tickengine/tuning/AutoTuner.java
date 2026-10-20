@@ -17,7 +17,9 @@ import net.minecraft.server.players.PlayerList;
  *
  * <p>Every {@code decisionSeconds} the average tick time over that period is compared with two
  * thresholds: above {@code raiseAboveMspt} the level goes up by one, below {@code lowerBelowMspt}
- * it goes down by one. A level is a number of steps applied in a fixed order, least visible
+ * it goes down by one, but only after the MSPT has stayed low for {@code relaxAfterSeconds}. If
+ * the load comes straight back after relaxing, that wait doubles (up to {@link #MAX_RELAX_SECONDS}),
+ * so a load sitting right at the threshold does not flip the level back and forth. A level is a number of steps applied in a fixed order, least visible
  * first:
  * <ol>
  *   <li>default throttle intervals, through safe values only (2, 4, 5, 10, 20)</li>
@@ -33,6 +35,10 @@ import net.minecraft.server.players.PlayerList;
 public final class AutoTuner {
 	/** Intervals that divide 20, 40 and 80, so periodic logic keeps running when throttled. */
 	private static final int[] SAFE_INTERVALS = {2, 4, 5, 10, 20, 40, 60, 80, 100};
+	/** Longest wait before relaxing, however often the load bounces back. */
+	private static final int MAX_RELAX_SECONDS = 600;
+	/** After this long without tightening, the wait goes back to relaxAfterSeconds. */
+	private static final int CALM_SECONDS = 600;
 
 	/** Effective values the throttles use. Distances are -1 when auto-tuning does not touch them. */
 	public record Values(int blockEntityInterval, int blockEntityRadius, int entityAiInterval, int entityTickInterval,
@@ -54,6 +60,12 @@ public final class AutoTuner {
 	private static long windowNanos;
 	private static int windowTicks;
 	private static double lastAverageMspt;
+
+	/** Current wait before relaxing; grows when relaxing is followed by tightening again. */
+	private static int relaxWaitSeconds = -1;
+	private static int lowSeconds;
+	private static int secondsSinceRelax = Integer.MAX_VALUE;
+	private static int secondsSinceRaise = Integer.MAX_VALUE;
 
 	private AutoTuner() {
 	}
@@ -93,13 +105,37 @@ public final class AutoTuner {
 		if (paused) {
 			return;
 		}
+		int elapsed = TickEngineConfig.decisionSeconds;
+		secondsSinceRelax = saturatedAdd(secondsSinceRelax, elapsed);
+		secondsSinceRaise = saturatedAdd(secondsSinceRaise, elapsed);
+		if (relaxWaitSeconds < TickEngineConfig.relaxAfterSeconds || secondsSinceRaise >= CALM_SECONDS) {
+			relaxWaitSeconds = TickEngineConfig.relaxAfterSeconds;
+		}
 		if (lastAverageMspt > TickEngineConfig.raiseAboveMspt && level < maxLevel) {
+			if (TickEngineConfig.relaxAfterSeconds > 0 && secondsSinceRelax <= 2 * relaxWaitSeconds) {
+				// Relaxing brought the load straight back: hold the next level longer.
+				relaxWaitSeconds = Math.min(relaxWaitSeconds * 2, Math.max(MAX_RELAX_SECONDS, TickEngineConfig.relaxAfterSeconds));
+			}
+			lowSeconds = 0;
+			secondsSinceRaise = 0;
 			setLevel(level + 1, "average MSPT " + format(lastAverageMspt) + " ms > " + TickEngineConfig.raiseAboveMspt);
 		} else if (lastAverageMspt < TickEngineConfig.lowerBelowMspt && level > 0
 			// Inconsistent thresholds would raise and lower on alternate decisions forever.
 			&& TickEngineConfig.lowerBelowMspt < TickEngineConfig.raiseAboveMspt) {
-			setLevel(level - 1, "average MSPT " + format(lastAverageMspt) + " ms < " + TickEngineConfig.lowerBelowMspt);
+			lowSeconds += elapsed;
+			if (lowSeconds >= relaxWaitSeconds) {
+				lowSeconds = 0;
+				secondsSinceRelax = 0;
+				setLevel(level - 1, "average MSPT " + format(lastAverageMspt) + " ms < " + TickEngineConfig.lowerBelowMspt
+					+ " for " + relaxWaitSeconds + " s");
+			}
+		} else {
+			lowSeconds = 0;
 		}
+	}
+
+	private static int saturatedAdd(int value, int add) {
+		return value > Integer.MAX_VALUE - add ? Integer.MAX_VALUE : value + add;
 	}
 
 	/** Forces a level and pauses automatic changes until {@link #resume()}. Returns the level set. */
@@ -107,6 +143,7 @@ public final class AutoTuner {
 		server = currentServer;
 		refresh();
 		paused = true;
+		resetRelaxState();
 		setLevel(Math.max(0, Math.min(requested, maxLevel)), "set by command");
 		return level;
 	}
@@ -130,6 +167,14 @@ public final class AutoTuner {
 		windowNanos = 0;
 		windowTicks = 0;
 		lastAverageMspt = 0;
+		resetRelaxState();
+	}
+
+	private static void resetRelaxState() {
+		relaxWaitSeconds = -1;
+		lowSeconds = 0;
+		secondsSinceRelax = Integer.MAX_VALUE;
+		secondsSinceRaise = Integer.MAX_VALUE;
 	}
 
 	private static void setLevel(int newLevel, String reason) {
@@ -318,6 +363,11 @@ public final class AutoTuner {
 
 	public static boolean isPaused() {
 		return paused;
+	}
+
+	/** Seconds the MSPT must stay low before the next relax step. */
+	public static int relaxWaitSeconds() {
+		return Math.max(relaxWaitSeconds, TickEngineConfig.relaxAfterSeconds);
 	}
 
 	public static double lastAverageMspt() {

@@ -89,6 +89,7 @@ public final class TickEngineConfig {
 	public static int raiseAboveMspt = 45;
 	public static int lowerBelowMspt = 30;
 	public static int decisionSeconds = 10;
+	public static int relaxAfterSeconds = 60;
 	public static boolean tuneIntervals = true;
 	public static boolean tuneRadii = true;
 	public static boolean tuneSimulationDistance = true;
@@ -242,6 +243,12 @@ public final class TickEngineConfig {
 		register(Option.integer("autoTuning.decisionSeconds",
 			"Seconds between decisions; the average MSPT is taken over the same period. Range: 2-300.",
 			2, 300, () -> decisionSeconds, v -> decisionSeconds = v));
+		register(Option.integer("autoTuning.relaxAfterSeconds",
+			"Relax only after the average MSPT has stayed below lowerBelowMspt this long. If the load comes\n"
+				+ "straight back after relaxing, the wait doubles (up to 10 minutes) and resets after 10 calm\n"
+				+ "minutes, so a load right at the threshold does not flip the level back and forth.\n"
+				+ "0 = relax on the first low decision, without the doubling. Range: 0-3600.",
+			0, 3600, () -> relaxAfterSeconds, v -> relaxAfterSeconds = v));
 		register(Option.bool("autoTuning.tuneIntervals",
 			"Step 1: raise the default throttle intervals (block entities and entities) through safe values\n"
 				+ "only: 2, 4, 5, 10, 20. Explicit rules are never changed.",

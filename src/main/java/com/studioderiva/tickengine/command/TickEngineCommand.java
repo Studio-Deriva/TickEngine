@@ -205,7 +205,8 @@ public final class TickEngineCommand {
 		source.sendSuccess(() -> header("Auto-tuning"), false);
 		source.sendSuccess(() -> line("State", tuningSummary(server), ChatFormatting.WHITE), false);
 		source.sendSuccess(() -> line("Thresholds", "tighten above " + TickEngineConfig.raiseAboveMspt + " ms, relax below "
-			+ TickEngineConfig.lowerBelowMspt + " ms, every " + TickEngineConfig.decisionSeconds + " s", ChatFormatting.WHITE), false);
+			+ TickEngineConfig.lowerBelowMspt + " ms for " + AutoTuner.relaxWaitSeconds() + " s, every "
+			+ TickEngineConfig.decisionSeconds + " s", ChatFormatting.WHITE), false);
 		source.sendSuccess(() -> line("Block entities", "interval " + values.blockEntityInterval() + ", radius "
 			+ values.blockEntityRadius() + " chunks", ChatFormatting.WHITE), false);
 		source.sendSuccess(() -> line("Entities", "AI every " + values.entityAiInterval() + ", far tick every "

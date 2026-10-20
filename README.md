@@ -97,6 +97,9 @@ Players are never throttled. Around the nearest player:
 Every `autoTuning.decisionSeconds` (10) TickEngine looks at the average MSPT over that time. Above
 `raiseAboveMspt` (45 ms) it tightens one level; below `lowerBelowMspt` (30 ms) it relaxes one level.
 `lowerBelowMspt` must be below `raiseAboveMspt`; commands reject values that break this.
+It relaxes only after the MSPT has stayed low for `relaxAfterSeconds` (60). If the load comes straight
+back after relaxing, that wait doubles (up to 10 minutes), so a load right at the threshold does not
+flip the level back and forth.
 Levels tighten in this order, least visible first, and relax in reverse:
 
 1. default throttle intervals, through safe values only: 4, 5, 10, 20 (explicit rules are never changed)
