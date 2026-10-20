@@ -49,7 +49,44 @@ public final class TickEngineConfig {
 	public static boolean stagger = false;
 	public static int forcedChunkMaxInterval = 2;
 	public static boolean dimensionRulesEnabled = false;
-	public static final ThrottleRules BLOCK_ENTITY_RULES = ThrottleRules.blockEntityDefaults();
+	public static final ThrottleRules<Integer> BLOCK_ENTITY_RULES = new ThrottleRules<>(ThrottleRules.INTERVAL,
+		new String[] {
+			"Interval per type or per mod: \"minecraft:hopper\": 2, \"create:*\": 8. 1 = never throttle.",
+			"The most specific rule wins (type before mod). Change live with '/tickengine rules blockentities'."},
+		new String[] {
+			"Same as 'rules' but only in one dimension; \"*\" matches every type there. Used only when",
+			"'dimensionRulesEnabled' is true. Example: \"minecraft:the_nether\": { \"*\": 10, \"create:*\": 2 }"});
+
+	// --- entity throttling ---
+	public static boolean entityThrottle = true;
+	public static int entityFullRadiusChunks = 2;
+	public static int entityAiRadiusChunks = 4;
+	public static int defaultAiInterval = 4;
+	public static int defaultTickInterval = 4;
+	public static int entityForcedChunkMaxInterval = 2;
+	public static boolean entityDimensionRulesEnabled = false;
+	public static boolean excludeProjectiles = true;
+	public static boolean excludeVehicles = true;
+	public static boolean excludeBosses = true;
+	public static boolean excludeCombat = true;
+	public static int combatSeconds = 10;
+	public static boolean wakeFallingOrInFluid = true;
+	public static boolean wakeNewEntities = true;
+	public static int newEntitySeconds = 10;
+	public static boolean wakeBreeding = true;
+	public static final ThrottleRules<ThrottleRules.EntityIntervals> ENTITY_RULES = new ThrottleRules<>(ThrottleRules.ENTITY_INTERVALS,
+		new String[] {
+			"Intervals per type or per mod: \"minecraft:villager\": { \"ai\": 2, \"tick\": 8 }.",
+			"\"ai\" applies between fullRadiusChunks and aiRadiusChunks, \"tick\" beyond. 1 = never throttle.",
+			"The most specific rule wins (type before mod). Change live with '/tickengine rules entities'."},
+		new String[] {
+			"Same as 'rules' but only in one dimension; \"*\" matches every type there. Used only when",
+			"'dimensionRulesEnabled' is true."});
+
+	// --- compatibility and notices ---
+	public static boolean disableEntityThrottleWithServerCore = true;
+	public static boolean noticesEnabled = true;
+	public static int noticeIntervalMinutes = 30;
 
 	/** Incremented on every change, so caches derived from the config know when to rebuild. */
 	public static int version;
@@ -109,6 +146,85 @@ public final class TickEngineConfig {
 		register(Option.bool("blockEntities.dimensionRulesEnabled",
 			"Use 'dimensionRules' below. When false, only 'rules' and 'defaultInterval' apply.",
 			() -> dimensionRulesEnabled, v -> dimensionRulesEnabled = v));
+
+		register(Option.bool("entities.enabled",
+			"Entity throttling (players are never throttled). Three zones around the nearest player:\n"
+				+ "- within fullRadiusChunks: everything normal\n"
+				+ "- up to aiRadiusChunks: movement normal, AI and pathfinding once every 'ai' ticks\n"
+				+ "- beyond: full tick once every 'tick' ticks; in between only timers advance (item and\n"
+				+ "  mob despawn, portal cooldown, burning time), so items still vanish after 5 minutes.",
+			() -> entityThrottle, v -> entityThrottle = v));
+		register(Option.integer("entities.fullRadiusChunks",
+			"Entities within this many chunks of a player are never throttled. Range: 0-32.",
+			0, 32, () -> entityFullRadiusChunks, v -> entityFullRadiusChunks = v));
+		register(Option.integer("entities.aiRadiusChunks",
+			"Up to this many chunks only AI is throttled; beyond it the whole tick is. Entities only tick\n"
+				+ "within the simulation distance, so keep this below it. Range: 0-32.",
+			0, 32, () -> entityAiRadiusChunks, v -> entityAiRadiusChunks = v));
+		register(Option.integer("entities.defaultAiInterval",
+			"AI runs once every N ticks in the AI zone (1 = no throttling). Range: 1-100.",
+			1, 100, () -> defaultAiInterval, v -> defaultAiInterval = v));
+		register(Option.integer("entities.defaultTickInterval",
+			"Full ticks happen once every N ticks beyond aiRadiusChunks (1 = no throttling).\n"
+				+ "Aligned to each entity's own tick counter, so logic like 'every 40 ticks' keeps working\n"
+				+ "with 2, 4, 5, 10 or 20. Range: 1-100.",
+			1, 100, () -> defaultTickInterval, v -> defaultTickInterval = v));
+		register(Option.integer("entities.forcedChunkMaxInterval",
+			"In force-loaded chunks without players, AI and ticks are never slower than once every N\n"
+				+ "ticks. 1 = never throttle them. Range: 1-100.",
+			1, 100, () -> entityForcedChunkMaxInterval, v -> entityForcedChunkMaxInterval = v));
+		register(Option.bool("entities.dimensionRulesEnabled",
+			"Use 'dimensionRules' below. When false, only 'rules' and the defaults apply.",
+			() -> entityDimensionRulesEnabled, v -> entityDimensionRulesEnabled = v));
+		register(Option.bool("entities.excludeProjectiles",
+			"Never throttle arrows, tridents, fireballs and other projectiles.",
+			() -> excludeProjectiles, v -> excludeProjectiles = v));
+		register(Option.bool("entities.excludeVehicles",
+			"Never throttle entities that carry passengers (minecarts, boats, ridden mobs).",
+			() -> excludeVehicles, v -> excludeVehicles = v));
+		register(Option.bool("entities.excludeBosses",
+			"Never throttle bosses: entity types in the 'c:bosses' tag (Ender Dragon, Wither and modded\n"
+				+ "bosses that use the tag).",
+			() -> excludeBosses, v -> excludeBosses = v));
+		register(Option.bool("entities.excludeCombat",
+			"Never throttle mobs in combat: hit by a player or mob (also with projectiles) in the last\n"
+				+ "'combatSeconds', or with an attack target. Environmental damage (fire, cactus) does not count.",
+			() -> excludeCombat, v -> excludeCombat = v));
+		register(Option.integer("entities.combatSeconds",
+			"How long a mob counts as in combat after being hit. Range: 1-120.",
+			1, 120, () -> combatSeconds, v -> combatSeconds = v));
+		register(Option.bool("entities.wakeFallingOrInFluid",
+			"Tick normally while falling, in lava, or in water (water mobs like fish and drowned are not\n"
+				+ "woken by water, since they live there).",
+			() -> wakeFallingOrInFluid, v -> wakeFallingOrInFluid = v));
+		register(Option.bool("entities.wakeNewEntities",
+			"Tick normally for the first 'newEntitySeconds' after spawning or loading.",
+			() -> wakeNewEntities, v -> wakeNewEntities = v));
+		register(Option.integer("entities.newEntitySeconds",
+			"See wakeNewEntities. Range: 1-120.",
+			1, 120, () -> newEntitySeconds, v -> newEntitySeconds = v));
+		register(Option.bool("entities.wakeBreeding",
+			"Tick normally while an animal is in love or is a baby, so far animal farms breed and grow\n"
+				+ "at normal speed.",
+			() -> wakeBreeding, v -> wakeBreeding = v));
+
+		register(Option.bool("compatibility.disableEntityThrottleWithServerCore",
+			"Turn off TickEngine's entity throttling while ServerCore's entity activation range is on, so\n"
+				+ "entities are not throttled twice. The profiler and block entity throttling keep running.",
+			() -> disableEntityThrottleWithServerCore, v -> disableEntityThrottleWithServerCore = v));
+		register(Option.bool("notices.enabled",
+			"Tell admins about problems (like the ServerCore conflict) when they join and every\n"
+				+ "'intervalMinutes'. Admins: operators at permissions.commandOpLevel or the tickengine.notify node.",
+			() -> noticesEnabled, v -> noticesEnabled = v));
+		register(Option.integer("notices.intervalMinutes",
+			"Minutes between repeated notices. Range: 1-1440.",
+			1, 1440, () -> noticeIntervalMinutes, v -> noticeIntervalMinutes = v));
+	}
+
+	static {
+		// Moving pistons must finish their animation on time, or flying machines and door
+		// mechanisms break when nobody is nearby.
+		BLOCK_ENTITY_RULES.set("minecraft:piston", 1, null);
 	}
 
 	private TickEngineConfig() {
@@ -147,6 +263,10 @@ public final class TickEngineConfig {
 				JsonElement blockEntities = root.get("blockEntities");
 				if (blockEntities != null && blockEntities.isJsonObject()) {
 					BLOCK_ENTITY_RULES.read(blockEntities.getAsJsonObject());
+				}
+				JsonElement entities = root.get("entities");
+				if (entities != null && entities.isJsonObject()) {
+					ENTITY_RULES.read(entities.getAsJsonObject());
 				}
 			} catch (Exception e) {
 				TickEngine.LOGGER.error("Could not read {}, using defaults for unreadable values", FILE, e);
@@ -202,6 +322,9 @@ public final class TickEngineConfig {
 		if (section.equals("blockEntities")) {
 			out.append(",\n");
 			BLOCK_ENTITY_RULES.write(out);
+		} else if (section.equals("entities")) {
+			out.append(",\n");
+			ENTITY_RULES.write(out);
 		}
 	}
 

@@ -1,13 +1,17 @@
 package com.studioderiva.tickengine;
 
 import com.studioderiva.tickengine.command.TickEngineCommand;
+import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
+import com.studioderiva.tickengine.throttle.EntityThrottle;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,15 +27,23 @@ public final class TickEngine implements DedicatedServerModInitializer {
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			TickProfiler.onTickEnd(server);
 			BlockEntityThrottle.onTickEnd();
+			EntityThrottle.onTickEnd();
+			ServerCoreCompat.tick();
+			AdminNotices.tick(server);
 		});
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> ServerCoreCompat.refresh());
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			TickProfiler.reset();
 			BlockEntityThrottle.reset();
+			EntityThrottle.reset();
+			AdminNotices.reset();
 		});
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> AdminNotices.onJoin(handler.getPlayer()));
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			TickEngineCommand.register(dispatcher));
 
-		LOGGER.info("TickEngine initialized (light profiler {}, block entity throttling {})",
-			TickEngineConfig.profilerEnabled ? "on" : "off", TickEngineConfig.blockEntityThrottle ? "on" : "off");
+		LOGGER.info("TickEngine initialized (light profiler {}, block entity throttling {}, entity throttling {})",
+			TickEngineConfig.profilerEnabled ? "on" : "off", TickEngineConfig.blockEntityThrottle ? "on" : "off",
+			TickEngineConfig.entityThrottle ? "on" : "off");
 	}
 }

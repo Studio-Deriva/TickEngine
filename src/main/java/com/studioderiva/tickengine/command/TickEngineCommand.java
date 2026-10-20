@@ -3,17 +3,23 @@ package com.studioderiva.tickengine.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.studioderiva.tickengine.TickEngine;
+import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.report.HtmlReport;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
+import com.studioderiva.tickengine.throttle.EntityThrottle;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 import java.util.Locale;
 import java.util.function.Predicate;
@@ -28,6 +34,7 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.permissions.PermissionLevel;
 
@@ -39,9 +46,10 @@ import net.minecraft.server.permissions.PermissionLevel;
  * /tickengine top [mods|blockentities|entities]
  * /tickengine profile start [seconds] | stop | report
  * /tickengine config list | get &lt;key&gt; | set &lt;key&gt; &lt;value&gt; | reload
- * /tickengine rules list
- * /tickengine rules set &lt;interval&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;interval&gt; &lt;target&gt;
- * /tickengine rules remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
+ * /tickengine rules blockentities list | set &lt;interval&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;interval&gt; &lt;target&gt;
+ *                                  | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
+ * /tickengine rules entities list | set &lt;ai&gt; &lt;tick&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;ai&gt; &lt;tick&gt; &lt;target&gt;
+ *                            | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
  * </pre>
  *
  * <p>Rule targets go last as greedy text because ids contain ':' which single-word
@@ -89,28 +97,8 @@ public final class TickEngineCommand {
 							.executes(TickEngineCommand::configSet)))))
 			.then(Commands.literal("rules")
 				.requires(permission("config"))
-				.then(Commands.literal("list").executes(TickEngineCommand::rulesList))
-				.then(Commands.literal("set")
-					.then(Commands.argument("interval", IntegerArgumentType.integer(ThrottleRules.MIN_INTERVAL, ThrottleRules.MAX_INTERVAL))
-						.then(Commands.argument("target", StringArgumentType.greedyString())
-							.suggests((context, builder) -> SharedSuggestionProvider.suggest(targetSuggestions(), builder))
-							.executes(context -> rulesSet(context, false)))))
-				.then(Commands.literal("set-in")
-					.then(Commands.argument("dimension", DimensionArgument.dimension())
-						.then(Commands.argument("interval", IntegerArgumentType.integer(ThrottleRules.MIN_INTERVAL, ThrottleRules.MAX_INTERVAL))
-							.then(Commands.argument("target", StringArgumentType.greedyString())
-								.suggests((context, builder) -> SharedSuggestionProvider.suggest(
-									Stream.concat(Stream.of(ThrottleRules.ALL), targetSuggestions()), builder))
-								.executes(context -> rulesSet(context, true))))))
-				.then(Commands.literal("remove")
-					.then(Commands.argument("target", StringArgumentType.greedyString())
-						.suggests((context, builder) -> SharedSuggestionProvider.suggest(
-							TickEngineConfig.BLOCK_ENTITY_RULES.rules().keySet(), builder))
-						.executes(context -> rulesRemove(context, false))))
-				.then(Commands.literal("remove-in")
-					.then(Commands.argument("dimension", DimensionArgument.dimension())
-						.then(Commands.argument("target", StringArgumentType.greedyString())
-							.executes(context -> rulesRemove(context, true)))))));
+				.then(blockEntityRules())
+				.then(entityRules())));
 	}
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
@@ -145,6 +133,22 @@ public final class TickEngineCommand {
 		} else {
 			source.sendSuccess(() -> line("Block entity throttle", "off", ChatFormatting.YELLOW), false);
 		}
+		if (EntityThrottle.isActive()) {
+			long full = EntityThrottle.fullLastSecond();
+			long aiSkipped = EntityThrottle.aiSkippedLastSecond();
+			long minimal = EntityThrottle.minimalLastSecond();
+			source.sendSuccess(() -> line("Entity throttle", "on, last second: " + full + " full ticks, " + aiSkipped
+				+ " without AI, " + minimal + " minimal", ChatFormatting.GREEN), false);
+		} else {
+			source.sendSuccess(() -> line("Entity throttle", TickEngineConfig.entityThrottle
+				? "paused (ServerCore activation range)" : "off", ChatFormatting.YELLOW), false);
+		}
+		if (ServerCoreCompat.installed()) {
+			source.sendSuccess(() -> line("ServerCore", "installed, activation range "
+				+ (ServerCoreCompat.activationRangeEnabled() ? (ServerCoreCompat.assumed() ? "assumed on" : "on") : "off"),
+				ChatFormatting.WHITE), false);
+		}
+		AdminNotices.problems().forEach(problem -> source.sendSuccess(() -> Component.literal(" ").append(problem), false));
 		return 1;
 	}
 
@@ -342,6 +346,7 @@ public final class TickEngineCommand {
 
 	private static int configReload(CommandContext<CommandSourceStack> context) {
 		TickEngineConfig.load();
+		ServerCoreCompat.refresh();
 		context.getSource().sendSuccess(() -> Component.literal("TickEngine config reloaded.")
 			.withStyle(ChatFormatting.GREEN), true);
 		return 1;
@@ -357,57 +362,124 @@ public final class TickEngineCommand {
 
 	// --- rules ---
 
-	private static int rulesList(CommandContext<CommandSourceStack> context) {
+	private static LiteralArgumentBuilder<CommandSourceStack> blockEntityRules() {
+		ThrottleRules<Integer> rules = TickEngineConfig.BLOCK_ENTITY_RULES;
+		return Commands.literal("blockentities")
+			.then(Commands.literal("list").executes(context -> rulesList(context, "Block entity rules", rules,
+				"Default interval", Integer.toString(TickEngineConfig.defaultInterval), TickEngineConfig.dimensionRulesEnabled)))
+			.then(Commands.literal("set")
+				.then(intervalArgument("interval")
+					.then(targetArgument(BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet(), false)
+						.executes(context -> rulesSet(context, rules, IntegerArgumentType.getInteger(context, "interval"),
+							false, "blockEntities.dimensionRulesEnabled", TickEngineConfig.dimensionRulesEnabled)))))
+			.then(Commands.literal("set-in")
+				.then(Commands.argument("dimension", DimensionArgument.dimension())
+					.then(intervalArgument("interval")
+						.then(targetArgument(BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet(), true)
+							.executes(context -> rulesSet(context, rules, IntegerArgumentType.getInteger(context, "interval"),
+								true, "blockEntities.dimensionRulesEnabled", TickEngineConfig.dimensionRulesEnabled))))))
+			.then(removeRule(rules, false))
+			.then(removeRule(rules, true));
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> entityRules() {
+		ThrottleRules<ThrottleRules.EntityIntervals> rules = TickEngineConfig.ENTITY_RULES;
+		return Commands.literal("entities")
+			.then(Commands.literal("list").executes(context -> rulesList(context, "Entity rules", rules,
+				"Defaults", rules.type().describe(new ThrottleRules.EntityIntervals(TickEngineConfig.defaultAiInterval,
+					TickEngineConfig.defaultTickInterval)), TickEngineConfig.entityDimensionRulesEnabled)))
+			.then(Commands.literal("set")
+				.then(intervalArgument("ai")
+					.then(intervalArgument("tick")
+						.then(targetArgument(BuiltInRegistries.ENTITY_TYPE.keySet(), false)
+							.executes(context -> rulesSet(context, rules, entityIntervals(context),
+								false, "entities.dimensionRulesEnabled", TickEngineConfig.entityDimensionRulesEnabled))))))
+			.then(Commands.literal("set-in")
+				.then(Commands.argument("dimension", DimensionArgument.dimension())
+					.then(intervalArgument("ai")
+						.then(intervalArgument("tick")
+							.then(targetArgument(BuiltInRegistries.ENTITY_TYPE.keySet(), true)
+								.executes(context -> rulesSet(context, rules, entityIntervals(context),
+									true, "entities.dimensionRulesEnabled", TickEngineConfig.entityDimensionRulesEnabled)))))))
+			.then(removeRule(rules, false))
+			.then(removeRule(rules, true));
+	}
+
+	private static ThrottleRules.EntityIntervals entityIntervals(CommandContext<CommandSourceStack> context) {
+		return new ThrottleRules.EntityIntervals(IntegerArgumentType.getInteger(context, "ai"),
+			IntegerArgumentType.getInteger(context, "tick"));
+	}
+
+	private static RequiredArgumentBuilder<CommandSourceStack, Integer> intervalArgument(String name) {
+		return Commands.argument(name, IntegerArgumentType.integer(ThrottleRules.MIN_INTERVAL, ThrottleRules.MAX_INTERVAL));
+	}
+
+	/** Targets go last as greedy text because ids contain ':', which single-word arguments reject. */
+	private static RequiredArgumentBuilder<CommandSourceStack, String> targetArgument(Set<Identifier> ids, boolean inDimension) {
+		return Commands.argument("target", StringArgumentType.greedyString())
+			.suggests((context, builder) -> SharedSuggestionProvider.suggest(
+				Stream.concat(inDimension ? Stream.of(ThrottleRules.ALL) : Stream.empty(), targetSuggestions(ids)), builder));
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> removeRule(ThrottleRules<?> rules, boolean inDimension) {
+		RequiredArgumentBuilder<CommandSourceStack, String> target = Commands.argument("target", StringArgumentType.greedyString())
+			.executes(context -> rulesRemove(context, rules, inDimension));
+		if (!inDimension) {
+			target = target.suggests((context, builder) -> SharedSuggestionProvider.suggest(rules.rules().keySet(), builder));
+			return Commands.literal("remove").then(target);
+		}
+		return Commands.literal("remove-in").then(Commands.argument("dimension", DimensionArgument.dimension()).then(target));
+	}
+
+	private static <V> int rulesList(CommandContext<CommandSourceStack> context, String title, ThrottleRules<V> rules,
+		String defaultLabel, String defaultValue, boolean dimensionRulesEnabled) {
 		CommandSourceStack source = context.getSource();
-		ThrottleRules rules = TickEngineConfig.BLOCK_ENTITY_RULES;
-		source.sendSuccess(() -> header("Block entity rules"), false);
-		source.sendSuccess(() -> line("Default interval", Integer.toString(TickEngineConfig.defaultInterval),
-			ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> header(title), false);
+		source.sendSuccess(() -> line(defaultLabel, defaultValue, ChatFormatting.WHITE), false);
 		if (rules.rules().isEmpty()) {
 			source.sendSuccess(() -> Component.literal(" no rules").withStyle(ChatFormatting.GRAY), false);
 		}
-		rules.rules().forEach((target, interval) -> source.sendSuccess(() -> ruleLine(target, interval), false));
-		for (Map.Entry<String, Map<String, Integer>> dimension : rules.dimensionRules().entrySet()) {
+		rules.rules().forEach((target, value) -> source.sendSuccess(() -> ruleLine(rules, target, value), false));
+		for (Map.Entry<String, Map<String, V>> dimension : rules.dimensionRules().entrySet()) {
 			source.sendSuccess(() -> Component.literal(" in " + dimension.getKey()
-				+ (TickEngineConfig.dimensionRulesEnabled ? "" : " (disabled: blockEntities.dimensionRulesEnabled is false)"))
-				.withStyle(ChatFormatting.AQUA), false);
-			dimension.getValue().forEach((target, interval) ->
-				source.sendSuccess(() -> Component.literal("  ").append(ruleLine(target, interval)), false));
+				+ (dimensionRulesEnabled ? "" : " (disabled in the config)")).withStyle(ChatFormatting.AQUA), false);
+			dimension.getValue().forEach((target, value) ->
+				source.sendSuccess(() -> Component.literal("  ").append(ruleLine(rules, target, value)), false));
 		}
 		return 1;
 	}
 
-	private static MutableComponent ruleLine(String target, int interval) {
-		return line(target, interval == 1 ? "never throttled" : "every " + interval + " ticks",
-			interval == 1 ? ChatFormatting.GREEN : ChatFormatting.WHITE);
+	private static <V> MutableComponent ruleLine(ThrottleRules<V> rules, String target, V value) {
+		return line(target, rules.type().describe(value), ChatFormatting.WHITE);
 	}
 
-	private static int rulesSet(CommandContext<CommandSourceStack> context, boolean inDimension) throws CommandSyntaxException {
+	private static <V> int rulesSet(CommandContext<CommandSourceStack> context, ThrottleRules<V> rules, V value,
+		boolean inDimension, String dimensionOption, boolean dimensionRulesEnabled) throws CommandSyntaxException {
 		CommandSourceStack source = context.getSource();
 		String target = StringArgumentType.getString(context, "target").trim();
-		int interval = IntegerArgumentType.getInteger(context, "interval");
 		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().identifier().toString() : null;
-		String error = TickEngineConfig.BLOCK_ENTITY_RULES.set(target, interval, dimension);
+		String error = rules.set(target, value, dimension);
 		if (error != null) {
 			source.sendFailure(Component.literal(error));
 			return 0;
 		}
 		TickEngineConfig.changed();
 		source.sendSuccess(() -> Component.literal("Rule saved:").withStyle(ChatFormatting.GREEN)
-			.append(ruleLine(target, interval))
+			.append(ruleLine(rules, target, value))
 			.append(Component.literal(dimension == null ? "" : " in " + dimension).withStyle(ChatFormatting.GRAY)), true);
-		if (dimension != null && !TickEngineConfig.dimensionRulesEnabled) {
+		if (dimension != null && !dimensionRulesEnabled) {
 			source.sendSuccess(() -> Component.literal("Dimension rules are disabled. Enable them with "
-				+ "'/tickengine config set blockEntities.dimensionRulesEnabled true'.").withStyle(ChatFormatting.YELLOW), false);
+				+ "'/tickengine config set " + dimensionOption + " true'.").withStyle(ChatFormatting.YELLOW), false);
 		}
 		return 1;
 	}
 
-	private static int rulesRemove(CommandContext<CommandSourceStack> context, boolean inDimension) throws CommandSyntaxException {
+	private static int rulesRemove(CommandContext<CommandSourceStack> context, ThrottleRules<?> rules, boolean inDimension)
+		throws CommandSyntaxException {
 		CommandSourceStack source = context.getSource();
 		String target = StringArgumentType.getString(context, "target").trim();
 		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().identifier().toString() : null;
-		if (!TickEngineConfig.BLOCK_ENTITY_RULES.remove(target, dimension)) {
+		if (!rules.remove(target, dimension)) {
 			source.sendFailure(Component.literal("No rule for '" + target + "'" + (dimension == null ? "" : " in " + dimension) + "."));
 			return 0;
 		}
@@ -417,9 +489,9 @@ public final class TickEngineCommand {
 		return 1;
 	}
 
-	/** Every registered block entity type, plus "namespace:*" for every mod that adds one. */
-	private static Stream<String> targetSuggestions() {
-		return BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet().stream()
+	/** Every id, plus "namespace:*" for every mod that registers one. */
+	private static Stream<String> targetSuggestions(Set<Identifier> ids) {
+		return ids.stream()
 			.flatMap(id -> Stream.of(id.toString(), id.getNamespace() + ":" + ThrottleRules.ALL))
 			.distinct();
 	}

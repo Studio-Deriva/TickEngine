@@ -4,7 +4,12 @@
 	"compatibilityLevel": "JAVA_21",
 	"server": [
 		"BoundTickingBlockEntityMixin",
+		"EntityInvoker",
+		"ExperienceOrbAccessor",
+		"ItemEntityAccessor",
 		"LevelMixin",
+		"LivingEntityAccessor",
+		"MobMixin",
 		"ServerLevelMixin"
 	],
 	"injectors": {

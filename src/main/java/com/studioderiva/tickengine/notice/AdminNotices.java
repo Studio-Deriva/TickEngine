@@ -1,0 +1,106 @@
+package com.studioderiva.tickengine.notice;
+
+import com.studioderiva.tickengine.TickEngine;
+import com.studioderiva.tickengine.compat.ServerCoreCompat;
+import com.studioderiva.tickengine.config.TickEngineConfig;
+import java.util.ArrayList;
+import java.util.List;
+import me.lucko.fabric.api.permissions.v0.Permissions;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.PermissionLevel;
+
+/**
+ * Tells admins about configuration problems: when they join, then every
+ * {@code notices.intervalMinutes} while the problem lasts. Admins are operators at
+ * {@code permissions.commandOpLevel} or players with the {@code tickengine.notify} node.
+ */
+public final class AdminNotices {
+	private static final String PERMISSION = TickEngine.MOD_ID + ".notify";
+
+	private static long ticksUntilRepeat;
+	private static boolean conflictLogged;
+
+	private AdminNotices() {
+	}
+
+	/** Current problems, as chat lines. Empty when everything is fine. */
+	public static List<Component> problems() {
+		List<Component> problems = new ArrayList<>();
+		if (serverCoreConflict()) {
+			problems.add(Component.literal("Entity throttling is paused: ServerCore's entity activation range is "
+				+ (ServerCoreCompat.assumed() ? "assumed to be on (its config could not be read)" : "on")
+				+ ", and throttling entities twice would freeze them. Use only one: disable ServerCore's "
+				+ "activation range, or set compatibility.disableEntityThrottleWithServerCore to false.")
+				.withStyle(ChatFormatting.YELLOW));
+		}
+		return problems;
+	}
+
+	private static boolean serverCoreConflict() {
+		return TickEngineConfig.entityThrottle && TickEngineConfig.disableEntityThrottleWithServerCore
+			&& ServerCoreCompat.activationRangeEnabled();
+	}
+
+	public static void onJoin(ServerPlayer player) {
+		if (TickEngineConfig.noticesEnabled && isAdmin(player)) {
+			send(player, problems());
+		}
+	}
+
+	/** Called every server tick. */
+	public static void tick(MinecraftServer server) {
+		boolean conflict = serverCoreConflict();
+		if (conflict != conflictLogged) {
+			conflictLogged = conflict;
+			if (conflict) {
+				TickEngine.LOGGER.warn("Entity throttling paused: ServerCore's entity activation range is enabled. "
+					+ "Use only one of the two, or set compatibility.disableEntityThrottleWithServerCore to false.");
+			} else {
+				TickEngine.LOGGER.info("Entity throttling resumed: no conflict with ServerCore anymore.");
+			}
+		}
+
+		if (--ticksUntilRepeat > 0) {
+			return;
+		}
+		ticksUntilRepeat = TickEngineConfig.noticeIntervalMinutes * 60L * 20L;
+		if (!TickEngineConfig.noticesEnabled) {
+			return;
+		}
+		List<Component> problems = problems();
+		if (problems.isEmpty()) {
+			return;
+		}
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			if (isAdmin(player)) {
+				send(player, problems);
+			}
+		}
+	}
+
+	private static boolean isAdmin(ServerPlayer player) {
+		return Permissions.check(player, PERMISSION, PermissionLevel.byId(TickEngineConfig.commandOpLevel));
+	}
+
+	private static void send(ServerPlayer player, List<Component> problems) {
+		for (Component problem : problems) {
+			MutableComponent hide = Component.literal(" [hide notices]").withStyle(style -> style
+				.withColor(ChatFormatting.GRAY)
+				.withClickEvent(new ClickEvent.SuggestCommand("/tickengine config set notices.enabled false"))
+				.withHoverEvent(new HoverEvent.ShowText(Component.literal("Turn these notices off"))));
+			player.sendSystemMessage(Component.literal("[TickEngine] ").withStyle(ChatFormatting.DARK_AQUA)
+				.append(problem).append(hide));
+		}
+	}
+
+	public static void reset() {
+		ticksUntilRepeat = 0;
+		conflictLogged = false;
+	}
+}
