@@ -5,8 +5,12 @@
 	"name": "TickEngine",
 	"description": "Server-side tick profiler and configurable throttling to run heavy modpacks on weak hardware.",
 	"authors": ["Studio Deriva"],
-	"contact": {},
+	"contact": {
+		"sources": "https://github.com/Studio-Deriva/TickEngine",
+		"issues": "https://discord.gg/pQPWr7vfHu"
+	},
 	"license": "MIT",
+	"icon": "assets/tickengine/icon.png",
 	"environment": "server",
 	"entrypoints": {
 		"server": ["com.studioderiva.tickengine.TickEngine"]

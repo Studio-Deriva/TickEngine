@@ -1,0 +1,379 @@
+================================================================================
+TICKENGINE - HOW WE VERIFIED AND FIXED THE BUGS
+================================================================================
+Project : TickEngine 1.0.0-beta.1
+Stack   : Minecraft 1.21.11 / Fabric loader 0.19.5 / Fabric API 0.141.6+1.21.11 /
+          Mojang mappings / Java 21
+Bundled : fabric-permissions-api 0.6.1
+Scope   : the whole mod - profiler, block entity and entity throttling,
+          auto-tuning, config, commands, HTML reports, ServerCore integration
+
+This is the record of the audit TickEngine went through before its first
+public beta, of what changed because of it, and of how much the mod actually
+saves. 7 findings, all closed. It is published for two reasons.
+
+The first: TickEngine changes how the game runs wherever no player is
+looking. Machines run slower, mobs think less often, and auto-tuning can lower
+the view distance of everyone online. Anyone running it on a server deserves
+to know how hard that was looked at, and what it costs in gameplay.
+
+The second: the last section says what has NOT been verified. Every audit has a
+boundary. Ours is written down instead of implied.
+
+Nothing here is marketing. Where a fix or a measurement has a known limit, the
+limit is stated next to it.
+
+
+--------------------------------------------------------------------------------
+HOW TO READ THIS FILE
+--------------------------------------------------------------------------------
+PART 1   How the code was examined
+PART 2   The 7 findings and their fixes
+PART 3   What came up while testing
+PART 4   What TickEngine saves, measured
+PART 5   What is still not verified
+
+Severities are the ones used during the audit:
+
+  CRITICAL  item duplication, mass data loss, or the server's authority bypassed
+  HIGH      a concrete exploit: crashing the server, locking players out of an
+            area, losing data
+  MEDIUM    a real defect with limited reach or a harder trigger
+  LOW       a real defect with minor impact
+  INFO      a problem only in unusual setups, or with no gameplay impact
+
+No CRITICAL or HIGH finding came up. No item duplication path was found.
+
+
+================================================================================
+PART 1 - HOW THE CODE WAS EXAMINED
+================================================================================
+
+What the findings rest on:
+
+  * Full reads of every source file: the mixins into block entity and entity
+    ticks, the throttles, the profiler, auto-tuning, config, commands, the
+    HTML report, ServerCore detection and admin notices.
+
+  * The decompiled Minecraft 1.21.11 sources, not documentation. They settled:
+    that Mob.serverAiStep alternates a full goal selection and a
+    running-goals-only update on the parity of tickCount + id (finding 2.1);
+    that ElderGuardian and Warden fire their area effects on
+    (tickCount + id) % 1200 and % 120; that item and XP despawn is driven by a
+    private age field reaching 6000; that beacons, vaults and trial spawners
+    act only on game times divisible by 80 or 20; that DedicatedServer's
+    distance setters write server.properties while PlayerList's do not.
+
+  * The ServerCore 1.5.15+1.21.11 jar, to read its activation range and
+    dynamic settings flags through reflection without depending on it.
+
+  * Every mixin validated against 1.21.11 before building.
+
+  * The Fabric dev server (./gradlew runServer) with a flat test world, driven
+    from the console: 256 hoppers, 256 furnaces, cows and pigs in
+    force-loaded chunks. Furnace output, item despawn, tick counts and rule
+    precedence were checked against expected numbers.
+
+  * A real client (./gradlew runClient) connected to the dev server, for what
+    needs a player: the AI zone, admin notices on join, the click-to-teleport
+    in /tickengine top, done in survival.
+
+  * A real Fabric server (official launcher, not the dev environment) with
+    -Xmx3G and 17 other mods: Lithium, FerriteCore, ServerCore, worldgen mods,
+    mob and AI mods, block entity mods (Simple Copper Pipes, CC: Tweaked).
+    67 mods loaded counting libraries.
+
+  * A player's own modpack on a local server with two clients, including
+    Physics Mod, under loads built to push the server past 50 ms per tick.
+
+What was NOT used: no debugger session (the IDE bridge was not available),
+no run on the reference hardware, no C2ME. See PART 5.
+
+
+================================================================================
+PART 2 - THE 7 FINDINGS AND THEIR FIXES
+================================================================================
+
+Ordered by severity.
+
+
+--------------------------------------------------------------------------------
+2.1 [MEDIUM] Half of the throttled mobs never started or stopped a goal
+--------------------------------------------------------------------------------
+In the throttled zones a mob's AI runs only on ticks where
+tickCount % interval == 0. Vanilla Mob.serverAiStep picks the kind of goal
+update with i = tickCount + getId(): when i is odd it only ticks the goals
+already running (tickRunningGoals(false)), otherwise it runs a full selection.
+With an even interval - 4 by default, 2 in force-loaded chunks, 10 and 20
+under auto-tuning - tickCount is always even on the AI turn, so the parity of i
+is the parity of the id. Every mob with an odd id got the partial update
+forever: no new goal, no goal stopped.
+
+In practice, about half of the far mobs never ate grass (sheep never grew their
+wool back), never picked a target, never fled, never followed food, until a
+player came close.
+
+Reproduced: 40 sheared sheep on grass in force-loaded chunks, no player,
+180 s. Throttle on: 22/40 with wool. Throttle off: 40/40. Halving the AI rate
+alone would give about 80%; 55% fits half of the flock never starting the
+eating goal.
+
+FIXED - throttle/EntityThrottle.java, mixin/MobMixin.java. A throttled entity
+on its turn now ticks in a mode of its own, and for mobs the partial update is
+replaced by a full goal selection. Same test after the fix: 38/40. With a
+player nearby, 20 sheep per zone over 180 s: 17/20 in the AI zone, 18/20
+beyond.
+
+The same parity problem hits ElderGuardian (mining fatigue on
+(tickCount + id) % 1200) and Warden (darkness on (tickCount + id) % 120),
+inside the AI step itself, and a goal fix can't reach it. Both are now never
+throttled, by two default rules ("ai": 1, "tick": 1) that a server can remove.
+
+Limit: default rules are written only into a new config file. A config created
+before this version keeps its own rule list.
+
+
+--------------------------------------------------------------------------------
+2.2 [MEDIUM] One syntax error in the config file wiped every setting
+--------------------------------------------------------------------------------
+If the file failed to parse - a double comma, a missing brace - the exception
+was logged and save() ran anyway, writing out the values in memory. At startup
+those are the defaults, so the whole config, rules included, was replaced by
+defaults. On /tickengine config reload, the previous values were written back
+and the edit with the typo was lost. The log line ("using defaults for
+unreadable values") suggested a per-option fallback; it was the whole file.
+
+Reproduced: defaultInterval 10 and a rule "minecraft:hopper": 8, then
+"sampleEveryTicks": 20,, and a restart. After it, the file had
+defaultInterval 4 and no hopper rule.
+
+FIXED - config/TickEngineConfig.java. A file that can't be parsed is left
+untouched and the settings already in use stay (the defaults at startup). The
+log says so and where the error is; /tickengine config reload fails with a
+message instead of claiming success. Checked: same broken file, same hash
+before and after both a restart and a reload; after fixing the typo, the
+reload loads the hopper rule and the interval.
+
+
+--------------------------------------------------------------------------------
+2.3 [LOW] output.reportDirectory could write reports anywhere on the machine
+--------------------------------------------------------------------------------
+The value was resolved against the server folder without normalising it, so
+absolute paths and ".." were accepted, and missing folders were created. A
+user with tickengine.config - operator level 3 by default, or a LuckPerms node
+given to staff who have no file access - could make the server create folders
+and tickengine-<date>.html files wherever its process can write. File name and
+content are not under their control, so the reach is small.
+
+Reproduced: ../../../../<outside path>, then /tickengine profile report; the
+file appeared outside the server folder.
+
+FIXED - config/TickEngineConfig.java, report/HtmlReport.java. The option
+refuses absolute paths and paths that leave the server folder once
+normalised. The report writer checks again before writing, in case a value
+gets in another way. Checked: "../../escape" and "/tmp/escape" refused,
+"tickengine/../tickengine/reports" accepted.
+
+
+--------------------------------------------------------------------------------
+2.4 [LOW] Bare /tickengine showed the status to users without tickengine.status
+--------------------------------------------------------------------------------
+The root command accepted any of the status, top, profile or config
+permissions and ran the status directly, while "/tickengine status" needed
+tickengine.status. With separate LuckPerms nodes, someone with only
+tickengine.top saw MSPT, throttle state, the auto-tuning level and admin
+notices.
+
+FIXED - command/TickEngineCommand.java. Bare /tickengine shows the status only
+with tickengine.status; otherwise it lists the subcommands the user may run.
+
+Not reproduced with a player: it needs a permissions mod to grant nodes
+separately. See PART 5.
+
+
+--------------------------------------------------------------------------------
+2.5 [LOW] Teleporting from the ranking could still land a player inside a block
+--------------------------------------------------------------------------------
+For block entities the landing point was the block's position plus one,
+without checking it was free. With stacked machines (hoppers under furnaces,
+rows of machines on several levels) the admin landed inside the block above
+and suffocated in survival.
+
+FIXED - command/TickEngineCommand.java. The landing point is the first spot,
+from the block above (or the entity's position) up to 64 blocks higher, with
+two free blocks. Checked with a player in survival on a hopper at y -60 under
+a solid block at -59: the click landed at -58, with -58 and -57 free.
+
+
+--------------------------------------------------------------------------------
+2.6 [LOW] Auto-tuning thresholds were not checked against each other
+--------------------------------------------------------------------------------
+raiseAboveMspt and lowerBelowMspt were only range-checked one by one. With
+lowerBelowMspt at or above raiseAboveMspt and an MSPT in between, the level
+went up on one decision and down on the next, forever: a simulation and view
+distance change every 10 seconds, chunks resent to every client.
+
+FIXED - config/TickEngineConfig.java, tuning/AutoTuner.java,
+command/TickEngineCommand.java. "/tickengine config set" refuses a value that
+breaks lowerBelowMspt < raiseAboveMspt and keeps the previous one. A file
+with such values loads with a warning, and auto-tuning does not relax while
+they stay inconsistent. Checked: 50 for lowerBelowMspt and 20 for
+raiseAboveMspt both refused.
+
+
+--------------------------------------------------------------------------------
+2.7 [INFO] The "without AI" counter included entities that have no AI
+--------------------------------------------------------------------------------
+In the AI zone every non-exempt entity got the AI-skipped mode and was counted
+as such, including items, XP orbs, minecarts and armor stands, which have no
+AI to skip and tick fully. /tickengine status overstated the work saved. No
+gameplay effect.
+
+FIXED - throttle/EntityThrottle.java. Only mobs get the AI-skipped mode; other
+entities in the AI zone count as full ticks.
+
+
+================================================================================
+PART 3 - WHAT CAME UP WHILE TESTING
+================================================================================
+
+  * Auto-tuning flip-flopped near the threshold. Under a real load of about
+    69 ms it went from level 0 to 2 in 20 seconds and brought the MSPT down to
+    about 27 ms. Then it relaxed to 0 at once, the load came back to 45-51 ms,
+    and it went up again: a cycle of about a minute. Harmless while only
+    intervals change, unpleasant once view distance is involved.
+
+    FIXED - tuning/AutoTuner.java, new option autoTuning.relaxAfterSeconds
+    (default 60). It relaxes only after the MSPT has stayed low that long. If
+    the load comes back within twice the wait, the next wait doubles, up to
+    10 minutes, and goes back to the configured value after 10 calm minutes.
+    0 keeps the old behaviour. Checked with thresholds set between two levels
+    on purpose (13 and 12 ms, with level 2 at about 13.3 ms and level 3 at
+    about 11.8 ms): one relax and one raise, the wait went to 120 s, and the
+    level then held for about 7 minutes. The old code was not rerun with the
+    same thresholds; the comparison is with the cycle seen before.
+
+  * When the load sits close to players, the first levels (intervals) can't
+    reduce it, and auto-tuning keeps climbing until it reaches the radii and
+    the distances. With test thresholds it reached level 9 and lowered the
+    view distance from 8 to 6. That is what the rules say it should do; the
+    README now tells admins how to keep their distances.
+
+  * Physics Mod showed no cost on the server: 148 client mixins and 2 server
+    mixins. Its physics runs on the client, where TickEngine does nothing.
+    The profiler groups time by the type that ticks, so work a mod adds to a
+    vanilla entity through mixins is counted under that vanilla type.
+
+  * The first click-to-teleport, found with a real client, put the player
+    inside the block entity itself. Fixed before the audit; finding 2.5 is
+    what was left of it.
+
+
+================================================================================
+PART 4 - WHAT TICKENGINE SAVES, MEASURED
+================================================================================
+
+All runs on a Mac, not on the reference hardware (an old 2-core PC with 4 GB).
+The server got -Xmx3G; where noted, -XX:ActiveProcessorCount=2 so Java sizes
+its thread pools and GC as on 2 cores. The core itself is much faster than an
+old PC's, so the milliseconds are lower than they would be there. The A/B
+comparisons are what matter. Order A, B, A, B in every test; A = TickEngine
+disabled, B = defaults.
+
+  1. Real Fabric server, 17 mods without C2ME, ActiveProcessorCount=2.
+     512 hoppers passing items, 256 furnaces smelting, 500 mobs (cows, sheep,
+     villagers, guard villagers, mooblooms, chickens), all in force-loaded
+     chunks, no player. 60 s warm-up, 180 s measured with /tick query every
+     5 s, plus the Java process CPU time.
+
+       run   avg MSPT   P95 (median)   P99 max   CPU in 180 s
+       A1    11.44 ms   14.4 ms        56.5 ms   45.7 s
+       B1     7.24 ms    9.9 ms        26.9 ms   29.9 s
+       A2    10.66 ms   13.2 ms        28.7 ms   44.0 s
+       B2     6.94 ms    9.5 ms        25.8 ms   28.9 s
+
+     Average MSPT -36%, P95 -30%, CPU -34%.
+
+     This is the "farms kept loaded" case: in force-loaded chunks the default
+     never slows things below one tick in two.
+
+  2. Player's modpack, two players online. 256 hoppers, 128 furnaces and
+     1400 mobs (600 villagers) in force-loaded chunks, one player about five
+     chunks away. A also had auto-tuning off. 30 s warm-up, 90 s measured.
+
+       run   avg MSPT          P95 (median)   CPU in 90 s
+       A1    56.0 ms (17.9 TPS)  78.7 ms      91 s
+       B1    38.0 ms             86.3 ms      68 s
+       A2    49.6 ms             68.8 ms      88 s
+       B2    24.5 ms             52.9 ms      49 s
+
+     Average MSPT -41%, CPU -35%. Without TickEngine the server used a whole
+     core, fell below 20 TPS and logged "Can't keep up!"; with it, it held
+     20 TPS. The load eased a little over time (A2 < A1, B2 < B1), which is
+     why the two pairs differ. P95 was mixed: worse in B1, better in B2.
+
+  3. Same modpack, lighter: 450 mobs, same machines.
+
+       A: 16.3 and 17.1 ms   B: 12.6 and 11.6 ms   (average MSPT -27%)
+       P95 median: A 21.1 and 24.1 ms, B 27.2 and 26.1 ms
+
+     Here P95 got worse with TickEngine. Our guess, not verified: with
+     blockEntities.stagger off, every throttled block entity ticks on the same
+     ticks, so less total work lands on fewer, heavier ticks. stagger true
+     spreads it out, at the cost of the game-time guarantee above.
+
+What it costs in gameplay, by design: far machines run at 1/4 speed (1/2 in
+force-loaded chunks without players), far mobs react later. In the sheep test
+of 2.1, 17-18 of 20 far sheep regrew their wool in 180 s, where all 40 did
+without throttling.
+
+
+================================================================================
+PART 5 - WHAT IS STILL NOT VERIFIED
+================================================================================
+
+This is the honest boundary of the work. None of the following is a known
+defect, unless it says so; all of it is something nobody has watched happen.
+
+  * The reference hardware. Every measurement ran on a Mac. The relative saving
+    should be similar on an old 2-core PC; it has not been measured there.
+
+  * C2ME. All its builds for 1.21.11 need Java 25 and it was not run.
+    Compatibility is unknown.
+
+  * Long runs. No server stayed up for more than about an hour. Memory
+    growth over many hours, and behaviour across many chunk unloads and
+    reloads with throttled entities, have not been watched.
+
+  * The Nether and the End. Every test ran in the Overworld. The code does not
+    care about the dimension, but farms typical of those dimensions (piglins,
+    endermen, shulkers) were not looked at.
+
+  * The P95 effect in PART 4.3 is a guess. Nobody has compared stagger on and
+    off under the same load.
+
+  * Permissions with a permissions mod. Finding 2.4 and the separate nodes in
+    general were checked on the code only; LuckPerms was never installed.
+
+  * Mods with their own chunk loaders. Areas they keep loaded with their own
+    tickets are treated as far chunks, not as force-loaded ones. That is known;
+    how each such mod reacts has not been tried.
+
+  * Modded machines and mobs beyond the tested set (Simple Copper Pipes,
+    CC: Tweaked, Guard Villagers, Friends&Foes, Mutant Monsters, Oh The Biomes
+    We've Gone). Create does not exist for Fabric 1.21.11 and was not tested.
+    Logic in other mods that relies on ticking every tick, far from players,
+    may slow down or misbehave; a rule with interval 1 turns throttling off for
+    it.
+
+  * Spark. Measurements used /tick query and the process CPU time, not a
+    sampling profiler.
+
+If you run TickEngine on a server and find something this audit missed, tell
+us: https://discord.gg/pQPWr7vfHu. A reproduction with the steps, your mod
+list and an HTML report from /tickengine profile start is worth more than any
+amount of further reading.
+
+================================================================================
+End of report. Studio Deriva.
+================================================================================

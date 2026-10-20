@@ -1,73 +1,92 @@
 # TickEngine
 
-Server-side Fabric mod by **Studio Deriva** that helps heavy modpacks run on weak hardware.
+Server-side tick profiler and throttling for Fabric 1.21.11, by [Studio Deriva](https://discord.gg/pQPWr7vfHu).
 
-TickEngine measures where server tick time goes (per mod, per block entity type, per entity type)
-and throttles block entities (machines, hoppers, furnaces) and entities (mobs, animals, items),
-vanilla or modded, that are far from every player. When the server struggles, auto-tuning tightens
-the throttles and distances step by step, and relaxes them again when load drops. It is designed to run **alongside**
-Lithium, C2ME, FerriteCore and ServerCore, not to replace them.
+TickEngine shows where your server's tick time goes — per mod, per block entity type, per entity
+type — and makes the things far from every player cost less: machines, hoppers and furnaces tick less
+often, far mobs think less often. When the server struggles, auto-tuning tightens the throttles step by
+step, and relaxes them again when the load is gone. It runs **alongside** Lithium, FerriteCore and
+ServerCore, not instead of them.
 
-- Minecraft 1.21.11, Fabric Loader 0.19.5+, Fabric API
-- Server only: players do not need it
-- Fully configurable (`config/tickengine.json5` and live commands)
+**Free and open source**, like everything we make: MIT, source included, no premium version.
 
-## Status
+> **Beta.** TickEngine changes how the game runs far from players. It has been tested on a dev server,
+> on a real Fabric server with a mod set and with a real modpack (see
+> [How this mod was checked](#how-this-mod-was-checked)), but not yet on many live servers. Keep a
+> backup of your world and tell us what you see.
 
-| Version | Feature | State |
-|---------|---------|-------|
-| 0.1 | Hybrid tick profiler (chat ranking + HTML report) | done |
-| 0.2 | Block entity throttling | done |
-| 0.3 | Entity and AI throttling | done |
-| 0.4 | MSPT-based auto-tuning | done |
+---
 
-## Commands
+## Features
 
-| Command | Description |
-|---------|-------------|
-| `/tickengine status` | MSPT, TPS, profiler state |
-| `/tickengine top [mods\|blockentities\|entities]` | Most expensive mods and types from the light profiler. Click a type to teleport to its slowest instance. |
-| `/tickengine profile start [seconds]` | Detailed session: measures every tick, then prints results and writes an HTML report |
-| `/tickengine profile stop` | Stop the session early |
-| `/tickengine profile report` | HTML report from the light profiler |
-| `/tickengine config list\|get\|set\|reload` | Read and change settings live; changes are saved to the file |
-| `/tickengine rules blockentities list` | Show block entity rules |
-| `/tickengine rules blockentities set <interval> <target>` | Rule for a type (`minecraft:hopper`) or a whole mod (`create:*`); interval 1 = never throttle |
-| `/tickengine rules entities list` | Show entity rules |
-| `/tickengine rules entities set <ai> <tick> <target>` | Entity rule: AI interval and far-tick interval (`minecraft:villager` or a whole mod like `somemod:*`) |
-| `/tickengine rules <blockentities\|entities> set-in <dimension> ... <target>` | Same, only in one dimension (`*` = every type there); needs `dimensionRulesEnabled` in that section |
-| `/tickengine rules <blockentities\|entities> remove <target>` / `remove-in <dimension> <target>` | Delete a rule |
-| `/tickengine tuning status` | Auto-tuning level and the values in use right now |
-| `/tickengine tuning pause` / `resume` | Stop or restart automatic level changes |
-| `/tickengine tuning level <n>` | Force a level (pauses automatic changes until `resume`) |
+- **Tick profiler, always on.** A light mode samples one tick per second at almost no cost and feeds
+  `/tickengine top`: the most expensive mods and types, with the slowest instance of each. Click one to
+  teleport there.
+- **Detailed sessions and HTML reports.** `/tickengine profile start` measures every tick for a while,
+  then prints the ranking and writes a self-contained HTML report (light and dark theme). Reports are
+  written off the server thread, so a slow disk never causes lag.
+- **Block entity throttling.** Block entities far from every player — vanilla or modded — tick once
+  every N ticks: a far furnace smelts at 1/4 speed and costs about 1/4 of the CPU.
+- **Entity and AI throttling.** Three zones around the nearest player: everything normal close by, AI
+  and pathfinding less often a bit farther, the whole tick less often beyond. Items and mobs still
+  despawn on time, and far mobs still eat, pick targets and flee.
+- **Sensible exceptions.** Never throttled: players, projectiles, vehicles with passengers, bosses,
+  mobs in combat, Elder Guardians, Wardens and moving pistons. Ticked normally while falling, in lava,
+  just spawned, in love or growing up.
+- **Rules per type, per mod and per dimension.** `minecraft:hopper` at 2, `create:*` at 8, villagers
+  untouched — the most specific rule wins.
+- **MSPT-based auto-tuning.** Above 45 ms it tightens one level, below 30 ms it relaxes one, least
+  visible step first: intervals, radii, simulation distance, view distance. Runtime only: it never
+  writes your config or server.properties.
+- **Fully configurable, live.** A commented `config/tickengine.json5`, every option also settable by
+  command and saved to the file.
+- **ServerCore aware.** If ServerCore already throttles entities or manages distances, TickEngine steps
+  back from that part and tells admins why.
 
-## Permissions
+## Requirements
 
-Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
-With LuckPerms (or any fabric-permissions-api provider) use these nodes:
-`tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
-`tickengine.notify` for admin notices (for example the ServerCore conflict below).
+| | |
+|---|---|
+| Minecraft | 1.21.11 |
+| Loader | Fabric 0.19.5+ |
+| Java | 21 |
+| Required | Fabric API |
+| Optional | LuckPerms (or any fabric-permissions-api provider) for permission nodes |
+
+Install it on the **server only**. Players don't need it, and it does nothing on a client.
+
+## Getting started
+
+1. Drop the jar in the server's `mods/` folder, next to Fabric API, and start the server. The config is
+   created at `config/tickengine.json5`.
+2. Play for a minute, then run `/tickengine top` to see what costs the most.
+3. Throttling and auto-tuning are on by default. `/tickengine status` shows what they are doing right
+   now: ticks skipped, mobs without AI, the auto-tuning level.
+4. Something must keep running at full speed? Add a rule:
+   `/tickengine rules blockentities set 1 somemod:important_machine` or
+   `/tickengine rules entities set 1 1 minecraft:villager`.
 
 ## How the profiler works
 
 - **Light mode** (always on): measures one tick every `profiler.sampleEveryTicks` ticks (default 20,
   one per second). On ticks that are not sampled the cost is a single boolean check per tick call.
-- **Detailed sessions** (on demand): measure every tick for a limited time.
-- Reports are written to disk off the server thread, so slow disks do not cause lag spikes.
+- **Detailed sessions** (on demand): measure every tick for a limited time
+  (`profiler.maxSessionSeconds`, default 600).
+- Time is grouped by mod (the namespace of the type) and by type. Work a mod adds to vanilla code
+  through mixins is counted under the vanilla type it runs in.
 
 ## How block entity throttling works
 
 - Block entities within `blockEntities.activeRadiusChunks` chunks (default 4) of any player tick normally.
-- Everything else ticks once every N ticks (`blockEntities.defaultInterval`, default 4): a far furnace
-  smelts at 1/4 speed and costs about 1/4 of the CPU.
+- Everything else ticks once every N ticks (`blockEntities.defaultInterval`, default 4).
 - Rules override the default. The most specific wins: dimension + type, type, dimension + mod, mod,
   dimension `*`, default. Moving pistons (`minecraft:piston`) are never throttled by default.
 - Force-loaded chunks without players tick at least every `blockEntities.forcedChunkMaxInterval` ticks
   (default 2; 1 = never throttle them). Mod chunk loaders that use their own tickets count as far chunks.
 - Throttled ticks happen on game times divisible by the interval, so blocks that act on
-  `gameTime % 20` or `% 80` (beacons, vaults, trial spawners, and any modded block that does the same) keep working with
-  intervals 2, 4, 5, 10 or 20. `blockEntities.stagger` spreads the work over ticks instead, at the cost
-  of that guarantee.
+  `gameTime % 20` or `% 80` (beacons, vaults, trial spawners, and any modded block that does the same)
+  keep working with intervals 2, 4, 5, 10 or 20. `blockEntities.stagger` spreads the work over ticks
+  instead, at the cost of that guarantee.
 
 ## How entity throttling works
 
@@ -100,6 +119,7 @@ Every `autoTuning.decisionSeconds` (10) TickEngine looks at the average MSPT ove
 It relaxes only after the MSPT has stayed low for `relaxAfterSeconds` (60). If the load comes straight
 back after relaxing, that wait doubles (up to 10 minutes), so a load right at the threshold does not
 flip the level back and forth.
+
 Levels tighten in this order, least visible first, and relax in reverse:
 
 1. default throttle intervals, through safe values only: 4, 5, 10, 20 (explicit rules are never changed)
@@ -107,31 +127,102 @@ Levels tighten in this order, least visible first, and relax in reverse:
 3. simulation distance, one per level, down to 4
 4. view distance, one per level, down to 6
 
-Every limit and step is configurable. Auto-tuning is runtime only: it never writes the config file or
-server.properties, starts at level 0 after a restart, and puts the original distances back when it
-relaxes or the server stops. Each level change is logged and, with `autoTuning.notifyAdmins`, sent to admins.
+If the load sits close to players, the first levels can't reduce it and auto-tuning goes on to the
+distances. Turn those steps off with `autoTuning.tuneSimulationDistance` and `tuneViewDistance` if you
+would rather keep them.
 
-## ServerCore
+Every limit and step is configurable. Auto-tuning starts at level 0 after a restart and puts the
+original distances back when it relaxes or the server stops. Each level change is logged and, with
+`autoTuning.notifyAdmins`, sent to admins.
 
-- **Entity activation range:** if it is enabled, TickEngine pauses its own entity throttling (profiler
-  and block entity throttling keep running), so entities are not throttled twice.
-- **Dynamic settings:** if they are enabled, ServerCore manages simulation and view distance and
-  TickEngine's auto-tuning only adjusts its own throttles.
+## Configuration
 
-Admins get a notice on join and every `notices.intervalMinutes` (30) while either applies. Turn this off
-with `compatibility.disableEntityThrottleWithServerCore`, `autoTuning.tuneSimulationDistance` and
-`tuneViewDistance`, or `notices.enabled`.
+`config/tickengine.json5`, created on first start. Every option has a comment in the file; the main
+ones:
 
-## Building
-
-Requires JDK 21.
-
-```bash
-./gradlew build
+```jsonc
+{
+  "profiler":      { "enabled": true, "sampleEveryTicks": 20, "windowSeconds": 60 },
+  "blockEntities": { "enabled": true, "activeRadiusChunks": 4, "defaultInterval": 4,
+                     "forcedChunkMaxInterval": 2, "rules": { "minecraft:piston": 1 } },
+  "entities":      { "enabled": true, "fullRadiusChunks": 2, "aiRadiusChunks": 4,
+                     "defaultAiInterval": 4, "defaultTickInterval": 4,
+                     "rules": { "minecraft:elder_guardian": { "ai": 1, "tick": 1 } } },
+  "autoTuning":    { "enabled": true, "raiseAboveMspt": 45, "lowerBelowMspt": 30,
+                     "relaxAfterSeconds": 60 }
+}
 ```
 
-The jar is in `build/libs/`.
+Change values live with `/tickengine config set <key> <value>`: they are checked and saved to the file.
+After editing the file by hand, run `/tickengine config reload`. A file with a syntax error is never
+overwritten: the settings in use are kept and the command tells you.
 
-## License
+## Commands
 
-MIT, see [LICENSE](LICENSE).
+| Command | What |
+|---------|------|
+| `/tickengine status` | MSPT, TPS, what the throttles and auto-tuning are doing |
+| `/tickengine top [mods\|blockentities\|entities]` | Most expensive mods and types from the light profiler. Click a type to teleport to its slowest instance. |
+| `/tickengine profile start [seconds]` | Detailed session: measures every tick, then prints results and writes an HTML report |
+| `/tickengine profile stop` | Stop the session early |
+| `/tickengine profile report` | HTML report from the light profiler |
+| `/tickengine config list\|get\|set\|reload` | Read and change settings live; changes are saved to the file |
+| `/tickengine rules blockentities list` | Show block entity rules |
+| `/tickengine rules blockentities set <interval> <target>` | Rule for a type (`minecraft:hopper`) or a whole mod (`create:*`); interval 1 = never throttle |
+| `/tickengine rules entities list` | Show entity rules |
+| `/tickengine rules entities set <ai> <tick> <target>` | Entity rule: AI interval and far-tick interval (`minecraft:villager` or a whole mod like `somemod:*`) |
+| `/tickengine rules <blockentities\|entities> set-in <dimension> ... <target>` | Same, only in one dimension (`*` = every type there); needs `dimensionRulesEnabled` in that section |
+| `/tickengine rules <blockentities\|entities> remove <target>` / `remove-in <dimension> <target>` | Delete a rule |
+| `/tickengine tuning status` | Auto-tuning level and the values in use right now |
+| `/tickengine tuning pause` / `resume` | Stop or restart automatic level changes |
+| `/tickengine tuning level <n>` | Force a level (pauses automatic changes until `resume`) |
+
+## Permissions
+
+Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
+With LuckPerms (or any fabric-permissions-api provider) use these nodes:
+`tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
+`tickengine.notify` for admin notices (auto-tuning changes, the ServerCore notices below).
+
+## Compatibility
+
+- **Lithium, FerriteCore**: tested together, no conflicts. Hoppers and furnaces that Lithium puts to
+  sleep don't tick at all, and TickEngine throttles the rest.
+- **ServerCore**:
+  - *Entity activation range:* if it is enabled, TickEngine pauses its own entity throttling (profiler
+    and block entity throttling keep running), so entities are not throttled twice.
+  - *Dynamic settings:* if they are enabled, ServerCore manages simulation and view distance and
+    TickEngine's auto-tuning only adjusts its own throttles.
+
+  Admins get a notice on join and every `notices.intervalMinutes` (30) while either applies.
+- **C2ME**: **not verified.** Every C2ME build for 1.21.11 needs Java 25, and we have not run it.
+  TickEngine is built for Java 21 and should load on Java 25 as well; tell us how it goes.
+- **Modded block entities and entities** are throttled like vanilla ones. If a mod's machine or mob
+  misbehaves when far away, give it a rule with interval 1 and tell us which one it is.
+
+## Building from source
+
+```
+./gradlew build          # jar in build/libs/
+./gradlew runServer      # dev server in run/
+```
+
+Java 21 or newer, and a first run with network access to fetch the dependencies.
+
+## How this mod was checked
+
+[`HOW_WE_VERIFIED_AND_FIXED_THE_BUGS.txt`](HOW_WE_VERIFIED_AND_FIXED_THE_BUGS.txt) is the full account
+of the audit behind this beta: 7 findings — mobs that never chose a goal while throttled, a config typo
+that wiped every setting, report paths outside the server folder and more — what each one was and what
+was changed to close it. It also has the performance measurements and says plainly what has **not**
+been verified yet.
+
+## Contributing
+
+Ideas, bug reports and pull requests are all welcome. Found a bug? Open a ticket on
+[our Discord](https://discord.gg/pQPWr7vfHu). If an idea of yours ships, your name goes in the
+credits and in the release notes. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licence
+
+MIT. See [LICENSE](LICENSE). © 2026 Studio Deriva.

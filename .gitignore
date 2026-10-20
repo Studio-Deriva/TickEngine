@@ -23,3 +23,6 @@ run-client/
 
 # OS
 .DS_Store
+
+# Publication assets and private notes (not part of the mod)
+docs/
