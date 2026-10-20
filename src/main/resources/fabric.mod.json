@@ -1,0 +1,22 @@
+{
+	"schemaVersion": 1,
+	"id": "tickengine",
+	"version": "${version}",
+	"name": "TickEngine",
+	"description": "Server-side tick profiler and configurable throttling to run heavy modpacks on weak hardware.",
+	"authors": ["Studio Deriva"],
+	"contact": {},
+	"license": "MIT",
+	"environment": "server",
+	"entrypoints": {
+		"server": ["com.studioderiva.tickengine.TickEngine"]
+	},
+	"mixins": ["tickengine.mixins.json"],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*",
+		"fabric-permissions-api-v0": "*"
+	}
+}

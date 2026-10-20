@@ -1,0 +1,446 @@
+package com.studioderiva.tickengine.command;
+
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.studioderiva.tickengine.TickEngine;
+import com.studioderiva.tickengine.config.ThrottleRules;
+import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.profiler.ProfileSnapshot;
+import com.studioderiva.tickengine.profiler.TickProfiler;
+import com.studioderiva.tickengine.report.HtmlReport;
+import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
+import java.util.Locale;
+import java.util.function.Predicate;
+import me.lucko.fabric.api.permissions.v0.Permissions;
+import net.minecraft.ChatFormatting;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.DimensionArgument;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.permissions.PermissionLevel;
+
+/**
+ * {@code /tickengine} command tree.
+ *
+ * <pre>
+ * /tickengine status
+ * /tickengine top [mods|blockentities|entities]
+ * /tickengine profile start [seconds] | stop | report
+ * /tickengine config list | get &lt;key&gt; | set &lt;key&gt; &lt;value&gt; | reload
+ * /tickengine rules list
+ * /tickengine rules set &lt;interval&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;interval&gt; &lt;target&gt;
+ * /tickengine rules remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
+ * </pre>
+ *
+ * <p>Rule targets go last as greedy text because ids contain ':' which single-word
+ * arguments do not accept.
+ */
+public final class TickEngineCommand {
+	private static final int DEFAULT_SESSION_SECONDS = 60;
+
+	private TickEngineCommand() {
+	}
+
+	public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+		dispatcher.register(Commands.literal("tickengine")
+			.requires(permission("status").or(permission("top")).or(permission("profile")).or(permission("config")))
+			.executes(TickEngineCommand::status)
+			.then(Commands.literal("status")
+				.requires(permission("status"))
+				.executes(TickEngineCommand::status))
+			.then(Commands.literal("top")
+				.requires(permission("top"))
+				.executes(context -> top(context, View.ALL))
+				.then(Commands.literal("mods").executes(context -> top(context, View.MODS)))
+				.then(Commands.literal("blockentities").executes(context -> top(context, View.BLOCK_ENTITIES)))
+				.then(Commands.literal("entities").executes(context -> top(context, View.ENTITIES))))
+			.then(Commands.literal("profile")
+				.requires(permission("profile"))
+				.then(Commands.literal("start")
+					.executes(context -> startSession(context, DEFAULT_SESSION_SECONDS))
+					.then(Commands.argument("seconds", IntegerArgumentType.integer(5))
+						.executes(context -> startSession(context, IntegerArgumentType.getInteger(context, "seconds")))))
+				.then(Commands.literal("stop").executes(TickEngineCommand::stopSession))
+				.then(Commands.literal("report").executes(TickEngineCommand::lightReport)))
+			.then(Commands.literal("config")
+				.requires(permission("config"))
+				.then(Commands.literal("list").executes(TickEngineCommand::configList))
+				.then(Commands.literal("reload").executes(TickEngineCommand::configReload))
+				.then(Commands.literal("get")
+					.then(Commands.argument("key", StringArgumentType.word())
+						.suggests((context, builder) -> SharedSuggestionProvider.suggest(TickEngineConfig.options().keySet(), builder))
+						.executes(TickEngineCommand::configGet)))
+				.then(Commands.literal("set")
+					.then(Commands.argument("key", StringArgumentType.word())
+						.suggests((context, builder) -> SharedSuggestionProvider.suggest(TickEngineConfig.options().keySet(), builder))
+						.then(Commands.argument("value", StringArgumentType.greedyString())
+							.executes(TickEngineCommand::configSet)))))
+			.then(Commands.literal("rules")
+				.requires(permission("config"))
+				.then(Commands.literal("list").executes(TickEngineCommand::rulesList))
+				.then(Commands.literal("set")
+					.then(Commands.argument("interval", IntegerArgumentType.integer(ThrottleRules.MIN_INTERVAL, ThrottleRules.MAX_INTERVAL))
+						.then(Commands.argument("target", StringArgumentType.greedyString())
+							.suggests((context, builder) -> SharedSuggestionProvider.suggest(targetSuggestions(), builder))
+							.executes(context -> rulesSet(context, false)))))
+				.then(Commands.literal("set-in")
+					.then(Commands.argument("dimension", DimensionArgument.dimension())
+						.then(Commands.argument("interval", IntegerArgumentType.integer(ThrottleRules.MIN_INTERVAL, ThrottleRules.MAX_INTERVAL))
+							.then(Commands.argument("target", StringArgumentType.greedyString())
+								.suggests((context, builder) -> SharedSuggestionProvider.suggest(
+									Stream.concat(Stream.of(ThrottleRules.ALL), targetSuggestions()), builder))
+								.executes(context -> rulesSet(context, true))))))
+				.then(Commands.literal("remove")
+					.then(Commands.argument("target", StringArgumentType.greedyString())
+						.suggests((context, builder) -> SharedSuggestionProvider.suggest(
+							TickEngineConfig.BLOCK_ENTITY_RULES.rules().keySet(), builder))
+						.executes(context -> rulesRemove(context, false))))
+				.then(Commands.literal("remove-in")
+					.then(Commands.argument("dimension", DimensionArgument.dimension())
+						.then(Commands.argument("target", StringArgumentType.greedyString())
+							.executes(context -> rulesRemove(context, true)))))));
+	}
+
+	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
+	private static Predicate<CommandSourceStack> permission(String name) {
+		String node = TickEngine.MOD_ID + "." + name;
+		return source -> Permissions.check(source, node, PermissionLevel.byId(TickEngineConfig.commandOpLevel));
+	}
+
+	// --- status ---
+
+	private static int status(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		MinecraftServer server = source.getServer();
+		double mspt = server.getAverageTickTimeNanos() / 1_000_000.0;
+		double tps = Math.min(20.0, 1000.0 / Math.max(mspt, 0.001));
+		source.sendSuccess(() -> header("TickEngine status"), false);
+		source.sendSuccess(() -> line("MSPT", format(mspt) + " ms", msptColor(mspt))
+			.append(Component.literal("  TPS ").withStyle(ChatFormatting.GRAY))
+			.append(Component.literal(format(tps)).withStyle(msptColor(mspt))), false);
+		source.sendSuccess(() -> line("Light profiler", TickEngineConfig.profilerEnabled
+			? "on, 1 tick every " + TickEngineConfig.sampleEveryTicks + ", window " + TickEngineConfig.windowSeconds + " s"
+			: "off", TickEngineConfig.profilerEnabled ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+		source.sendSuccess(() -> line("Detailed session", TickProfiler.isSessionRunning()
+			? "running, " + TickProfiler.sessionSecondsLeft() + " s left"
+			: "not running", TickProfiler.isSessionRunning() ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		if (TickEngineConfig.blockEntityThrottle) {
+			long ticked = BlockEntityThrottle.tickedLastSecond();
+			long skipped = BlockEntityThrottle.skippedLastSecond();
+			double percent = ticked + skipped == 0 ? 0 : skipped * 100.0 / (ticked + skipped);
+			source.sendSuccess(() -> line("Block entity throttle", "on, skipped " + skipped + " of " + (ticked + skipped)
+				+ " ticks in the last second (" + format(percent) + "%)", ChatFormatting.GREEN), false);
+		} else {
+			source.sendSuccess(() -> line("Block entity throttle", "off", ChatFormatting.YELLOW), false);
+		}
+		return 1;
+	}
+
+	// --- top ---
+
+	private enum View { ALL, MODS, BLOCK_ENTITIES, ENTITIES }
+
+	private static int top(CommandContext<CommandSourceStack> context, View view) {
+		CommandSourceStack source = context.getSource();
+		ProfileSnapshot snapshot = TickProfiler.lightSnapshot();
+		if (snapshot == null) {
+			source.sendFailure(Component.literal(TickEngineConfig.profilerEnabled
+				? "No data yet. The light profiler needs a few seconds after startup."
+				: "The light profiler is off. Enable it with '/tickengine config set profiler.enabled true'"
+					+ " or run '/tickengine profile start'."));
+			return 0;
+		}
+		printSnapshot(source, snapshot, view);
+		return 1;
+	}
+
+	private static void printSnapshot(CommandSourceStack source, ProfileSnapshot snapshot, View view) {
+		source.sendSuccess(() -> header(snapshot.label)
+			.append(Component.literal(" (" + snapshot.sampledTicks + " ticks, avg " + format(snapshot.averageTickMs())
+				+ " ms)").withStyle(ChatFormatting.GRAY)), false);
+		if (view == View.ALL || view == View.MODS) {
+			printMods(source, snapshot);
+		}
+		if (view == View.ALL || view == View.BLOCK_ENTITIES) {
+			printEntries(source, snapshot, ProfileSnapshot.Category.BLOCK_ENTITY, "Block entities");
+		}
+		if (view == View.ALL || view == View.ENTITIES) {
+			printEntries(source, snapshot, ProfileSnapshot.Category.ENTITY, "Entities");
+		}
+	}
+
+	private static void printMods(CommandSourceStack source, ProfileSnapshot snapshot) {
+		List<ProfileSnapshot.ModEntry> mods = snapshot.mods();
+		source.sendSuccess(() -> Component.literal("Mods").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
+		if (mods.isEmpty()) {
+			source.sendSuccess(() -> Component.literal("  no data").withStyle(ChatFormatting.GRAY), false);
+		}
+		for (int i = 0; i < Math.min(TickEngineConfig.chatTopEntries, mods.size()); i++) {
+			ProfileSnapshot.ModEntry mod = mods.get(i);
+			int rank = i + 1;
+			source.sendSuccess(() -> Component.literal(" " + rank + ". ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal(mod.displayName()).withStyle(ChatFormatting.WHITE))
+				.append(timing(snapshot, mod.totalNanos())), false);
+		}
+	}
+
+	private static void printEntries(CommandSourceStack source, ProfileSnapshot snapshot,
+		ProfileSnapshot.Category category, String title) {
+		List<ProfileSnapshot.Entry> entries = snapshot.entries(category);
+		source.sendSuccess(() -> Component.literal(title).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
+		if (entries.isEmpty()) {
+			source.sendSuccess(() -> Component.literal("  no data").withStyle(ChatFormatting.GRAY), false);
+		}
+		for (int i = 0; i < Math.min(TickEngineConfig.chatTopEntries, entries.size()); i++) {
+			ProfileSnapshot.Entry entry = entries.get(i);
+			int rank = i + 1;
+			MutableComponent name = Component.literal(entry.id()).withStyle(ChatFormatting.WHITE);
+			if (entry.worstPos() != null) {
+				String dimension = entry.worstDimension().identifier().toString();
+				String coordinates = entry.worstPos().getX() + " " + entry.worstPos().getY() + " " + entry.worstPos().getZ();
+				name = name.withStyle(style -> style
+					.withClickEvent(new ClickEvent.RunCommand("/execute in " + dimension + " run tp @s " + coordinates))
+					.withHoverEvent(new HoverEvent.ShowText(Component.literal(
+						"Slowest instance: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one tick\n"
+							+ dimension + " " + coordinates + "\nClick to teleport")))
+					.withUnderlined(true));
+			}
+			MutableComponent finalName = name;
+			double perTick = entry.calls() / (double) snapshot.sampledTicks;
+			source.sendSuccess(() -> Component.literal(" " + rank + ". ").withStyle(ChatFormatting.GRAY)
+				.append(finalName)
+				.append(Component.literal(" x" + format(perTick)).withStyle(ChatFormatting.DARK_GRAY))
+				.append(timing(snapshot, entry.totalNanos())), false);
+		}
+	}
+
+	private static MutableComponent timing(ProfileSnapshot snapshot, long totalNanos) {
+		double percent = snapshot.percentOfTick(totalNanos);
+		return Component.literal("  " + format(snapshot.msPerTick(totalNanos)) + " ms/tick")
+			.withStyle(percent >= 20 ? ChatFormatting.RED : percent >= 5 ? ChatFormatting.YELLOW : ChatFormatting.GREEN)
+			.append(Component.literal(" (" + format(percent) + "%)").withStyle(ChatFormatting.GRAY));
+	}
+
+	// --- profile ---
+
+	private static int startSession(CommandContext<CommandSourceStack> context, int seconds) {
+		CommandSourceStack source = context.getSource();
+		if (seconds > TickEngineConfig.maxSessionSeconds) {
+			source.sendFailure(Component.literal("Maximum session length is " + TickEngineConfig.maxSessionSeconds
+				+ " s (config: profiler.maxSessionSeconds)."));
+			return 0;
+		}
+		MinecraftServer server = source.getServer();
+		boolean started = TickProfiler.startSession(seconds, result -> finishSession(server, source, result));
+		if (!started) {
+			source.sendFailure(Component.literal("A session is already running ("
+				+ TickProfiler.sessionSecondsLeft() + " s left). Use '/tickengine profile stop'."));
+			return 0;
+		}
+		source.sendSuccess(() -> Component.literal("Detailed profiling started for " + seconds
+			+ " s. Every tick is measured; results and an HTML report follow when it ends.")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int stopSession(CommandContext<CommandSourceStack> context) {
+		if (!TickProfiler.stopSession()) {
+			context.getSource().sendFailure(Component.literal("No detailed session is running."));
+			return 0;
+		}
+		return 1;
+	}
+
+	private static void finishSession(MinecraftServer server, CommandSourceStack source, ProfileSnapshot result) {
+		if (result.isEmpty()) {
+			source.sendFailure(Component.literal("The session ended before any tick was measured."));
+			return;
+		}
+		printSnapshot(source, result, View.ALL);
+		writeReport(server, source, result);
+	}
+
+	private static int lightReport(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		ProfileSnapshot snapshot = TickProfiler.lightSnapshot();
+		if (snapshot == null) {
+			source.sendFailure(Component.literal("No light profiler data yet."));
+			return 0;
+		}
+		writeReport(source.getServer(), source, snapshot);
+		return 1;
+	}
+
+	private static void writeReport(MinecraftServer server, CommandSourceStack source, ProfileSnapshot snapshot) {
+		HtmlReport.writeAsync(server, snapshot).whenComplete((file, error) -> server.execute(() -> {
+			if (error != null) {
+				TickEngine.LOGGER.error("Could not write HTML report", error);
+				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
+			} else {
+				String path = server.getServerDirectory().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
+				source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
+					.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
+			}
+		}));
+	}
+
+	// --- config ---
+
+	private static int configList(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("TickEngine config"), false);
+		TickEngineConfig.options().forEach((key, option) ->
+			source.sendSuccess(() -> line(key, option.format(), ChatFormatting.WHITE)
+				.withStyle(style -> style
+					.withHoverEvent(new HoverEvent.ShowText(Component.literal(option.comment)))
+					.withClickEvent(new ClickEvent.SuggestCommand("/tickengine config set " + key + " "))), false));
+		return 1;
+	}
+
+	private static int configGet(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		TickEngineConfig.Option<?> option = option(source, StringArgumentType.getString(context, "key"));
+		if (option == null) {
+			return 0;
+		}
+		source.sendSuccess(() -> line(option.key, option.format(), ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> Component.literal(option.comment).withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static int configSet(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		TickEngineConfig.Option<?> option = option(source, StringArgumentType.getString(context, "key"));
+		if (option == null) {
+			return 0;
+		}
+		String error = option.set(StringArgumentType.getString(context, "value"));
+		if (error != null) {
+			source.sendFailure(Component.literal(option.key + ": " + error));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Set ").withStyle(ChatFormatting.GREEN)
+			.append(Component.literal(option.key).withStyle(ChatFormatting.WHITE))
+			.append(Component.literal(" to ").withStyle(ChatFormatting.GREEN))
+			.append(Component.literal(option.format()).withStyle(ChatFormatting.WHITE))
+			.append(Component.literal(" and saved to the config file.").withStyle(ChatFormatting.GREEN)), true);
+		return 1;
+	}
+
+	private static int configReload(CommandContext<CommandSourceStack> context) {
+		TickEngineConfig.load();
+		context.getSource().sendSuccess(() -> Component.literal("TickEngine config reloaded.")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static TickEngineConfig.Option<?> option(CommandSourceStack source, String key) {
+		TickEngineConfig.Option<?> option = TickEngineConfig.options().get(key);
+		if (option == null) {
+			source.sendFailure(Component.literal("Unknown option '" + key + "'. Use '/tickengine config list'."));
+		}
+		return option;
+	}
+
+	// --- rules ---
+
+	private static int rulesList(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		ThrottleRules rules = TickEngineConfig.BLOCK_ENTITY_RULES;
+		source.sendSuccess(() -> header("Block entity rules"), false);
+		source.sendSuccess(() -> line("Default interval", Integer.toString(TickEngineConfig.defaultInterval),
+			ChatFormatting.WHITE), false);
+		if (rules.rules().isEmpty()) {
+			source.sendSuccess(() -> Component.literal(" no rules").withStyle(ChatFormatting.GRAY), false);
+		}
+		rules.rules().forEach((target, interval) -> source.sendSuccess(() -> ruleLine(target, interval), false));
+		for (Map.Entry<String, Map<String, Integer>> dimension : rules.dimensionRules().entrySet()) {
+			source.sendSuccess(() -> Component.literal(" in " + dimension.getKey()
+				+ (TickEngineConfig.dimensionRulesEnabled ? "" : " (disabled: blockEntities.dimensionRulesEnabled is false)"))
+				.withStyle(ChatFormatting.AQUA), false);
+			dimension.getValue().forEach((target, interval) ->
+				source.sendSuccess(() -> Component.literal("  ").append(ruleLine(target, interval)), false));
+		}
+		return 1;
+	}
+
+	private static MutableComponent ruleLine(String target, int interval) {
+		return line(target, interval == 1 ? "never throttled" : "every " + interval + " ticks",
+			interval == 1 ? ChatFormatting.GREEN : ChatFormatting.WHITE);
+	}
+
+	private static int rulesSet(CommandContext<CommandSourceStack> context, boolean inDimension) throws CommandSyntaxException {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		int interval = IntegerArgumentType.getInteger(context, "interval");
+		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().identifier().toString() : null;
+		String error = TickEngineConfig.BLOCK_ENTITY_RULES.set(target, interval, dimension);
+		if (error != null) {
+			source.sendFailure(Component.literal(error));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Rule saved:").withStyle(ChatFormatting.GREEN)
+			.append(ruleLine(target, interval))
+			.append(Component.literal(dimension == null ? "" : " in " + dimension).withStyle(ChatFormatting.GRAY)), true);
+		if (dimension != null && !TickEngineConfig.dimensionRulesEnabled) {
+			source.sendSuccess(() -> Component.literal("Dimension rules are disabled. Enable them with "
+				+ "'/tickengine config set blockEntities.dimensionRulesEnabled true'.").withStyle(ChatFormatting.YELLOW), false);
+		}
+		return 1;
+	}
+
+	private static int rulesRemove(CommandContext<CommandSourceStack> context, boolean inDimension) throws CommandSyntaxException {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().identifier().toString() : null;
+		if (!TickEngineConfig.BLOCK_ENTITY_RULES.remove(target, dimension)) {
+			source.sendFailure(Component.literal("No rule for '" + target + "'" + (dimension == null ? "" : " in " + dimension) + "."));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Rule removed: " + target + (dimension == null ? "" : " in " + dimension))
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	/** Every registered block entity type, plus "namespace:*" for every mod that adds one. */
+	private static Stream<String> targetSuggestions() {
+		return BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet().stream()
+			.flatMap(id -> Stream.of(id.toString(), id.getNamespace() + ":" + ThrottleRules.ALL))
+			.distinct();
+	}
+
+	// --- formatting ---
+
+	private static MutableComponent header(String title) {
+		return Component.literal("[TickEngine] ").withStyle(ChatFormatting.DARK_AQUA)
+			.append(Component.literal(title).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD));
+	}
+
+	private static MutableComponent line(String label, String value, ChatFormatting color) {
+		return Component.literal(" " + label + ": ").withStyle(ChatFormatting.GRAY)
+			.append(Component.literal(value).withStyle(color));
+	}
+
+	private static ChatFormatting msptColor(double mspt) {
+		return mspt >= 50 ? ChatFormatting.RED : mspt >= 35 ? ChatFormatting.YELLOW : ChatFormatting.GREEN;
+	}
+
+	private static String format(double value) {
+		return String.format(Locale.ROOT, value >= 100 ? "%.0f" : value >= 10 ? "%.1f" : "%.2f", value);
+	}
+}

@@ -1,0 +1,23 @@
+# Local working notes (not part of the mod)
+PROGRESSO.txt
+DECISIONI.txt
+
+# Gradle
+.gradle/
+build/
+out/
+classes/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+bin/
+
+# Dev server
+run/
+
+# OS
+.DS_Store

@@ -1,0 +1,13 @@
+{
+	"required": true,
+	"package": "com.studioderiva.tickengine.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"server": [
+		"BoundTickingBlockEntityMixin",
+		"LevelMixin",
+		"ServerLevelMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
