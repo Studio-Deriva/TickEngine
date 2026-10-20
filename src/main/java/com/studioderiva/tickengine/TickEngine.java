@@ -7,6 +7,7 @@ import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
+import com.studioderiva.tickengine.tuning.AutoTuner;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -23,15 +24,21 @@ public final class TickEngine implements DedicatedServerModInitializer {
 	public void onInitializeServer() {
 		TickEngineConfig.load();
 
-		ServerTickEvents.START_SERVER_TICK.register(TickProfiler::onTickStart);
+		ServerTickEvents.START_SERVER_TICK.register(server -> {
+			TickProfiler.onTickStart(server);
+			AutoTuner.onTickStart();
+		});
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			TickProfiler.onTickEnd(server);
 			BlockEntityThrottle.onTickEnd();
 			EntityThrottle.onTickEnd();
 			ServerCoreCompat.tick();
+			AutoTuner.onTickEnd(server);
 			AdminNotices.tick(server);
 		});
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> ServerCoreCompat.refresh());
+		// Before worlds save, so the original distances are back in place.
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> AutoTuner.shutdown());
 		ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
 			TickProfiler.reset();
 			BlockEntityThrottle.reset();
@@ -42,8 +49,9 @@ public final class TickEngine implements DedicatedServerModInitializer {
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			TickEngineCommand.register(dispatcher));
 
-		LOGGER.info("TickEngine initialized (light profiler {}, block entity throttling {}, entity throttling {})",
-			TickEngineConfig.profilerEnabled ? "on" : "off", TickEngineConfig.blockEntityThrottle ? "on" : "off",
-			TickEngineConfig.entityThrottle ? "on" : "off");
+		LOGGER.info("TickEngine initialized (light profiler {}, block entity throttling {}, entity throttling {}, "
+			+ "auto-tuning {})", TickEngineConfig.profilerEnabled ? "on" : "off",
+			TickEngineConfig.blockEntityThrottle ? "on" : "off", TickEngineConfig.entityThrottle ? "on" : "off",
+			TickEngineConfig.autoTuning ? "on" : "off");
 	}
 }

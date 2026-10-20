@@ -7,6 +7,7 @@ import com.studioderiva.tickengine.mixin.EntityInvoker;
 import com.studioderiva.tickengine.mixin.ExperienceOrbAccessor;
 import com.studioderiva.tickengine.mixin.ItemEntityAccessor;
 import com.studioderiva.tickengine.mixin.LivingEntityAccessor;
+import com.studioderiva.tickengine.tuning.AutoTuner;
 import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.HashMap;
@@ -96,7 +97,7 @@ public final class EntityThrottle {
 			intervalsVersion = TickEngineConfig.version;
 		}
 		playerDistance.clear();
-		int radius = Math.max(TickEngineConfig.entityFullRadiusChunks, TickEngineConfig.entityAiRadiusChunks);
+		int radius = Math.max(AutoTuner.values().entityFullRadius(), AutoTuner.values().entityAiRadius());
 		for (ServerPlayer player : level.players()) {
 			ChunkPos center = player.chunkPosition();
 			for (int dx = -radius; dx <= radius; dx++) {
@@ -125,12 +126,12 @@ public final class EntityThrottle {
 		}
 		long chunk = entity.chunkPosition().toLong();
 		int distance = playerDistance.get(chunk);
-		if (distance <= TickEngineConfig.entityFullRadiusChunks || isExempt(entity)) {
+		if (distance <= AutoTuner.values().entityFullRadius() || isExempt(entity)) {
 			fullNow++;
 			return Mode.FULL;
 		}
 		ThrottleRules.EntityIntervals rule = intervals(entity.getType());
-		boolean aiZone = distance <= TickEngineConfig.entityAiRadiusChunks;
+		boolean aiZone = distance <= AutoTuner.values().entityAiRadius();
 		int interval = aiZone ? rule.ai() : rule.tick();
 		if (interval > 1 && forcedChunks.contains(chunk)) {
 			interval = Math.min(interval, TickEngineConfig.entityForcedChunkMaxInterval);
@@ -207,7 +208,7 @@ public final class EntityThrottle {
 			// Unregistered types cannot be matched by rules: leave them alone.
 			rule = id == null ? new ThrottleRules.EntityIntervals(1, 1) : TickEngineConfig.ENTITY_RULES.resolve(id,
 				preparedLevel.dimension().identifier(), TickEngineConfig.entityDimensionRulesEnabled,
-				new ThrottleRules.EntityIntervals(TickEngineConfig.defaultAiInterval, TickEngineConfig.defaultTickInterval));
+				new ThrottleRules.EntityIntervals(AutoTuner.values().entityAiInterval(), AutoTuner.values().entityTickInterval()));
 			cache.put(type, rule);
 		}
 		return rule;

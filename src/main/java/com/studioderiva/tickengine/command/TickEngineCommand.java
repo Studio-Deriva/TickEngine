@@ -17,6 +17,7 @@ import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.report.HtmlReport;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
+import com.studioderiva.tickengine.tuning.AutoTuner;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +51,7 @@ import net.minecraft.server.permissions.PermissionLevel;
  *                                  | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
  * /tickengine rules entities list | set &lt;ai&gt; &lt;tick&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;ai&gt; &lt;tick&gt; &lt;target&gt;
  *                            | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
+ * /tickengine tuning status | pause | resume | level &lt;n&gt;
  * </pre>
  *
  * <p>Rule targets go last as greedy text because ids contain ':' which single-word
@@ -98,7 +100,15 @@ public final class TickEngineCommand {
 			.then(Commands.literal("rules")
 				.requires(permission("config"))
 				.then(blockEntityRules())
-				.then(entityRules())));
+				.then(entityRules()))
+			.then(Commands.literal("tuning")
+				.requires(permission("config"))
+				.then(Commands.literal("status").executes(TickEngineCommand::tuningStatus))
+				.then(Commands.literal("pause").executes(TickEngineCommand::tuningPause))
+				.then(Commands.literal("resume").executes(TickEngineCommand::tuningResume))
+				.then(Commands.literal("level")
+					.then(Commands.argument("level", IntegerArgumentType.integer(0))
+						.executes(TickEngineCommand::tuningLevel)))));
 	}
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
@@ -143,12 +153,76 @@ public final class TickEngineCommand {
 			source.sendSuccess(() -> line("Entity throttle", TickEngineConfig.entityThrottle
 				? "paused (ServerCore activation range)" : "off", ChatFormatting.YELLOW), false);
 		}
+		source.sendSuccess(() -> line("Auto-tuning", tuningSummary(server),
+			TickEngineConfig.autoTuning ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
 		if (ServerCoreCompat.installed()) {
 			source.sendSuccess(() -> line("ServerCore", "installed, activation range "
-				+ (ServerCoreCompat.activationRangeEnabled() ? (ServerCoreCompat.assumed() ? "assumed on" : "on") : "off"),
-				ChatFormatting.WHITE), false);
+				+ onOff(ServerCoreCompat.activationRangeEnabled()) + ", dynamic settings "
+				+ onOff(ServerCoreCompat.dynamicSettingsEnabled()), ChatFormatting.WHITE), false);
 		}
 		AdminNotices.problems().forEach(problem -> source.sendSuccess(() -> Component.literal(" ").append(problem), false));
+		return 1;
+	}
+
+	private static String onOff(boolean value) {
+		return value ? (ServerCoreCompat.assumed() ? "assumed on" : "on") : "off";
+	}
+
+	/** One-line auto-tuning state, also used by the HTML report. */
+	public static String tuningSummary(MinecraftServer server) {
+		if (!TickEngineConfig.autoTuning) {
+			return "off";
+		}
+		return "level " + AutoTuner.level() + "/" + AutoTuner.maxLevel(server)
+			+ (AutoTuner.isPaused() ? " (paused)" : "")
+			+ (AutoTuner.lastAverageMspt() > 0 ? ", last average " + format(AutoTuner.lastAverageMspt()) + " ms" : "");
+	}
+
+	// --- tuning ---
+
+	private static int tuningStatus(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		MinecraftServer server = source.getServer();
+		AutoTuner.Values values = AutoTuner.values();
+		source.sendSuccess(() -> header("Auto-tuning"), false);
+		source.sendSuccess(() -> line("State", tuningSummary(server), ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Thresholds", "tighten above " + TickEngineConfig.raiseAboveMspt + " ms, relax below "
+			+ TickEngineConfig.lowerBelowMspt + " ms, every " + TickEngineConfig.decisionSeconds + " s", ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Block entities", "interval " + values.blockEntityInterval() + ", radius "
+			+ values.blockEntityRadius() + " chunks", ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Entities", "AI every " + values.entityAiInterval() + ", far tick every "
+			+ values.entityTickInterval() + ", full radius " + values.entityFullRadius() + ", AI radius "
+			+ values.entityAiRadius() + " chunks", ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Distances", "simulation " + server.getPlayerList().getSimulationDistance()
+			+ ", view " + server.getPlayerList().getViewDistance()
+			+ (ServerCoreCompat.dynamicSettingsEnabled() ? " (managed by ServerCore)" : ""), ChatFormatting.WHITE), false);
+		return 1;
+	}
+
+	private static int tuningPause(CommandContext<CommandSourceStack> context) {
+		AutoTuner.pause();
+		context.getSource().sendSuccess(() -> Component.literal("Auto-tuning paused at level " + AutoTuner.level()
+			+ ". Use '/tickengine tuning resume' to continue.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int tuningResume(CommandContext<CommandSourceStack> context) {
+		AutoTuner.resume();
+		context.getSource().sendSuccess(() -> Component.literal("Auto-tuning resumed.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int tuningLevel(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		if (!TickEngineConfig.autoTuning) {
+			source.sendFailure(Component.literal("Auto-tuning is off. Enable it with '/tickengine config set autoTuning.enabled true'."));
+			return 0;
+		}
+		int requested = IntegerArgumentType.getInteger(context, "level");
+		int set = AutoTuner.forceLevel(source.getServer(), requested);
+		source.sendSuccess(() -> Component.literal("Auto-tuning set to level " + set
+			+ (set != requested ? " (highest available)" : "") + " and paused. Use '/tickengine tuning resume' to let it "
+			+ "adjust again.").withStyle(ChatFormatting.GREEN), true);
 		return 1;
 	}
 

@@ -1,6 +1,7 @@
 package com.studioderiva.tickengine.throttle;
 
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.tuning.AutoTuner;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
@@ -58,7 +59,7 @@ public final class BlockEntityThrottle {
 			intervalsVersion = TickEngineConfig.version;
 		}
 		activeChunks.clear();
-		int radius = TickEngineConfig.activeRadiusChunks;
+		int radius = AutoTuner.values().blockEntityRadius();
 		for (ServerPlayer player : level.players()) {
 			ChunkPos center = player.chunkPosition();
 			for (int x = center.x - radius; x <= center.x + radius; x++) {
@@ -114,7 +115,7 @@ public final class BlockEntityThrottle {
 			// Unregistered types cannot be matched by rules: leave them alone.
 			interval = id == null ? 1 : TickEngineConfig.BLOCK_ENTITY_RULES.resolve(id,
 				preparedLevel.dimension().identifier(), TickEngineConfig.dimensionRulesEnabled,
-				TickEngineConfig.defaultInterval);
+				AutoTuner.values().blockEntityInterval());
 			cache.put(type, interval);
 		}
 		return interval;

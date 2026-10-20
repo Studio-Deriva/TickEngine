@@ -39,7 +39,27 @@ public final class AdminNotices {
 				+ "activation range, or set compatibility.disableEntityThrottleWithServerCore to false.")
 				.withStyle(ChatFormatting.YELLOW));
 		}
+		if (TickEngineConfig.autoTuning && (TickEngineConfig.tuneSimulationDistance || TickEngineConfig.tuneViewDistance)
+			&& ServerCoreCompat.dynamicSettingsEnabled()) {
+			problems.add(Component.literal("Auto-tuning leaves simulation and view distance to ServerCore's dynamic settings"
+				+ (ServerCoreCompat.assumed() ? " (assumed on: its config could not be read)" : "")
+				+ " and only adjusts TickEngine's throttles. To let TickEngine manage the distances, disable ServerCore's "
+				+ "dynamic settings; to hide this, set autoTuning.tuneSimulationDistance and tuneViewDistance to false.")
+				.withStyle(ChatFormatting.YELLOW));
+		}
 		return problems;
+	}
+
+	/** Sends a message to every online admin, if notices are enabled. */
+	public static void sendToAdmins(MinecraftServer server, Component message) {
+		if (!TickEngineConfig.noticesEnabled) {
+			return;
+		}
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			if (isAdmin(player)) {
+				player.sendSystemMessage(Component.literal("[TickEngine] ").withStyle(ChatFormatting.DARK_AQUA).append(message));
+			}
+		}
 	}
 
 	private static boolean serverCoreConflict() {

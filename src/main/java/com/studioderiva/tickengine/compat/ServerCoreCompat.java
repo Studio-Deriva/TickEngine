@@ -5,10 +5,11 @@ import java.lang.reflect.Method;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * Reads whether ServerCore's entity activation range is enabled, without a compile-time
- * dependency: {@code Config.get().activationRange().enabled()} via reflection (API checked
- * against ServerCore 1.5.15+1.21.11). ServerCore can reload its config, so the value is read
- * again every {@link #CHECK_INTERVAL_TICKS} ticks.
+ * Reads whether ServerCore's entity activation range and dynamic settings are enabled, without a
+ * compile-time dependency: {@code Config.get().activationRange().enabled()} and
+ * {@code Config.get().dynamic().enabled()} via reflection (API checked against ServerCore
+ * 1.5.15+1.21.11). ServerCore can reload its config, so the values are read again every
+ * {@link #CHECK_INTERVAL_TICKS} ticks.
  *
  * <p>If ServerCore is installed but its API cannot be read (for example after an update that
  * renames it), the activation range is assumed to be on, which is the safe side.
@@ -19,10 +20,13 @@ public final class ServerCoreCompat {
 
 	private static Method configGet;
 	private static Method activationRange;
-	private static Method enabled;
+	private static Method activationRangeEnabled;
+	private static Method dynamic;
+	private static Method dynamicEnabled;
 	private static boolean apiBroken;
 
 	private static boolean cachedEnabled;
+	private static boolean cachedDynamicEnabled;
 	private static int ticksUntilCheck;
 
 	private ServerCoreCompat() {
@@ -37,6 +41,14 @@ public final class ServerCoreCompat {
 		return cachedEnabled;
 	}
 
+	/**
+	 * True when ServerCore is installed and its dynamic settings (which change simulation and
+	 * view distance by tick time) are on, or unreadable.
+	 */
+	public static boolean dynamicSettingsEnabled() {
+		return cachedDynamicEnabled;
+	}
+
 	/** True when the state could not be read and is only assumed. */
 	public static boolean assumed() {
 		return INSTALLED && apiBroken;
@@ -47,40 +59,55 @@ public final class ServerCoreCompat {
 		if (!INSTALLED || --ticksUntilCheck > 0) {
 			return;
 		}
-		ticksUntilCheck = CHECK_INTERVAL_TICKS;
-		cachedEnabled = read();
+		refresh();
 	}
 
-	/** Reads the value now (at startup and after a config reload). */
+	/** Reads the values now (at startup and after a config reload). */
 	public static void refresh() {
 		ticksUntilCheck = CHECK_INTERVAL_TICKS;
-		cachedEnabled = INSTALLED && read();
+		if (!INSTALLED) {
+			cachedEnabled = false;
+			cachedDynamicEnabled = false;
+			return;
+		}
+		read();
 	}
 
-	private static boolean read() {
+	/** Reads both flags; on any failure both are assumed on, which is the safe side. */
+	private static void read() {
 		if (apiBroken) {
-			return true;
+			cachedEnabled = true;
+			cachedDynamicEnabled = true;
+			return;
 		}
 		try {
 			if (configGet == null) {
 				ClassLoader loader = ServerCoreCompat.class.getClassLoader();
 				configGet = Class.forName("me.wesley1808.servercore.common.config.Config", true, loader).getMethod("get");
-				activationRange = Class.forName("me.wesley1808.servercore.common.config.MainConfig", true, loader)
-					.getMethod("activationRange");
-				enabled = Class.forName("me.wesley1808.servercore.common.config.data.activation_range.ActivationRangeConfig",
-					true, loader).getMethod("enabled");
+				Class<?> mainConfig = Class.forName("me.wesley1808.servercore.common.config.MainConfig", true, loader);
+				activationRange = mainConfig.getMethod("activationRange");
+				dynamic = mainConfig.getMethod("dynamic");
+				activationRangeEnabled = Class.forName(
+					"me.wesley1808.servercore.common.config.data.activation_range.ActivationRangeConfig", true, loader)
+					.getMethod("enabled");
+				dynamicEnabled = Class.forName("me.wesley1808.servercore.common.config.data.dynamic.DynamicConfig", true, loader)
+					.getMethod("enabled");
 			}
 			Object config = configGet.invoke(null);
 			if (config == null) {
 				// Not loaded yet: assume on until the next check.
-				return true;
+				cachedEnabled = true;
+				cachedDynamicEnabled = true;
+				return;
 			}
-			return (boolean) enabled.invoke(activationRange.invoke(config));
+			cachedEnabled = (boolean) activationRangeEnabled.invoke(activationRange.invoke(config));
+			cachedDynamicEnabled = (boolean) dynamicEnabled.invoke(dynamic.invoke(config));
 		} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
 			apiBroken = true;
+			cachedEnabled = true;
+			cachedDynamicEnabled = true;
 			TickEngine.LOGGER.warn("ServerCore is installed but its config could not be read; assuming its entity "
-				+ "activation range is enabled.", e);
-			return true;
+				+ "activation range and dynamic settings are enabled.", e);
 		}
 	}
 }

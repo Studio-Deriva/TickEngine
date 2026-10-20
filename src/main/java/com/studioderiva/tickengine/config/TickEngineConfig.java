@@ -83,6 +83,23 @@ public final class TickEngineConfig {
 			"Same as 'rules' but only in one dimension; \"*\" matches every type there. Used only when",
 			"'dimensionRulesEnabled' is true."});
 
+	// --- auto-tuning ---
+	public static boolean autoTuning = true;
+	public static int raiseAboveMspt = 45;
+	public static int lowerBelowMspt = 30;
+	public static int decisionSeconds = 10;
+	public static boolean tuneIntervals = true;
+	public static boolean tuneRadii = true;
+	public static boolean tuneSimulationDistance = true;
+	public static boolean tuneViewDistance = true;
+	public static int maxTunedInterval = 20;
+	public static int minBlockEntityRadius = 2;
+	public static int minEntityFullRadius = 1;
+	public static int minEntityAiRadius = 2;
+	public static int minSimulationDistance = 4;
+	public static int minViewDistance = 6;
+	public static boolean notifyTuningChanges = true;
+
 	// --- compatibility and notices ---
 	public static boolean disableEntityThrottleWithServerCore = true;
 	public static boolean noticesEnabled = true;
@@ -208,6 +225,59 @@ public final class TickEngineConfig {
 				+ "at normal speed.",
 			() -> wakeBreeding, v -> wakeBreeding = v));
 
+		register(Option.bool("autoTuning.enabled",
+			"Adjusts throttling to the server load. Every 'decisionSeconds' it looks at the average MSPT:\n"
+				+ "above 'raiseAboveMspt' it tightens one level, below 'lowerBelowMspt' it relaxes one level.\n"
+				+ "Levels tighten, in order: throttle intervals, throttle radii, simulation distance, view distance.\n"
+				+ "Runtime only: never written to this file or server.properties; restarts at level 0.",
+			() -> autoTuning, v -> autoTuning = v));
+		register(Option.integer("autoTuning.raiseAboveMspt",
+			"Tighten one level when the average MSPT is above this (50 = below 20 TPS). Range: 10-200.",
+			10, 200, () -> raiseAboveMspt, v -> raiseAboveMspt = v));
+		register(Option.integer("autoTuning.lowerBelowMspt",
+			"Relax one level when the average MSPT is below this. Keep it well below raiseAboveMspt to avoid\n"
+				+ "flip-flopping. Range: 1-199.",
+			1, 199, () -> lowerBelowMspt, v -> lowerBelowMspt = v));
+		register(Option.integer("autoTuning.decisionSeconds",
+			"Seconds between decisions; the average MSPT is taken over the same period. Range: 2-300.",
+			2, 300, () -> decisionSeconds, v -> decisionSeconds = v));
+		register(Option.bool("autoTuning.tuneIntervals",
+			"Step 1: raise the default throttle intervals (block entities and entities) through safe values\n"
+				+ "only: 2, 4, 5, 10, 20. Explicit rules are never changed.",
+			() -> tuneIntervals, v -> tuneIntervals = v));
+		register(Option.bool("autoTuning.tuneRadii",
+			"Step 2: shrink the throttle radii around players by one chunk per level.",
+			() -> tuneRadii, v -> tuneRadii = v));
+		register(Option.bool("autoTuning.tuneSimulationDistance",
+			"Step 3: lower the simulation distance by one per level. Skipped while ServerCore's dynamic\n"
+				+ "settings are on (ServerCore manages the distances then).",
+			() -> tuneSimulationDistance, v -> tuneSimulationDistance = v));
+		register(Option.bool("autoTuning.tuneViewDistance",
+			"Step 4: lower the view distance by one per level. Helps RAM and network more than CPU.\n"
+				+ "Skipped while ServerCore's dynamic settings are on.",
+			() -> tuneViewDistance, v -> tuneViewDistance = v));
+		register(Option.integer("autoTuning.maxInterval",
+			"Highest throttle interval auto-tuning may reach. Range: 2-100.",
+			2, 100, () -> maxTunedInterval, v -> maxTunedInterval = v));
+		register(Option.integer("autoTuning.minBlockEntityRadius",
+			"Smallest block entity radius (chunks) auto-tuning may reach. Range: 0-32.",
+			0, 32, () -> minBlockEntityRadius, v -> minBlockEntityRadius = v));
+		register(Option.integer("autoTuning.minEntityFullRadius",
+			"Smallest entity full-tick radius (chunks) auto-tuning may reach. Range: 0-32.",
+			0, 32, () -> minEntityFullRadius, v -> minEntityFullRadius = v));
+		register(Option.integer("autoTuning.minEntityAiRadius",
+			"Smallest entity AI radius (chunks) auto-tuning may reach. Range: 0-32.",
+			0, 32, () -> minEntityAiRadius, v -> minEntityAiRadius = v));
+		register(Option.integer("autoTuning.minSimulationDistance",
+			"Lowest simulation distance auto-tuning may set. Range: 2-32.",
+			2, 32, () -> minSimulationDistance, v -> minSimulationDistance = v));
+		register(Option.integer("autoTuning.minViewDistance",
+			"Lowest view distance auto-tuning may set. Range: 2-32.",
+			2, 32, () -> minViewDistance, v -> minViewDistance = v));
+		register(Option.bool("autoTuning.notifyAdmins",
+			"Tell admins in chat on every level change (always logged). Also needs notices.enabled.",
+			() -> notifyTuningChanges, v -> notifyTuningChanges = v));
+
 		register(Option.bool("compatibility.disableEntityThrottleWithServerCore",
 			"Turn off TickEngine's entity throttling while ServerCore's entity activation range is on, so\n"
 				+ "entities are not throttled twice. The profiler and block entity throttling keep running.",
@@ -242,6 +312,11 @@ public final class TickEngineConfig {
 	public static void changed() {
 		version++;
 		save();
+	}
+
+	/** Rebuilds caches derived from the config without saving, e.g. after an auto-tuning step. */
+	public static void invalidateCaches() {
+		version++;
 	}
 
 	/** Loads the file, keeping defaults for missing or invalid values, then rewrites it. */

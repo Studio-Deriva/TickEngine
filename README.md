@@ -4,7 +4,8 @@ Server-side Fabric mod by **Studio Deriva** that helps heavy modpacks run on wea
 
 TickEngine measures where server tick time goes (per mod, per block entity type, per entity type)
 and throttles block entities (machines, hoppers, furnaces) and entities (mobs, animals, items),
-vanilla or modded, that are far from every player. It is designed to run **alongside**
+vanilla or modded, that are far from every player. When the server struggles, auto-tuning tightens
+the throttles and distances step by step, and relaxes them again when load drops. It is designed to run **alongside**
 Lithium, C2ME, FerriteCore and ServerCore, not to replace them.
 
 - Minecraft 1.21.11, Fabric Loader 0.19.5+, Fabric API
@@ -18,7 +19,7 @@ Lithium, C2ME, FerriteCore and ServerCore, not to replace them.
 | 0.1 | Hybrid tick profiler (chat ranking + HTML report) | done |
 | 0.2 | Block entity throttling | done |
 | 0.3 | Entity and AI throttling | done |
-| 0.4 | MSPT-based auto-tuning | planned |
+| 0.4 | MSPT-based auto-tuning | done |
 
 ## Commands
 
@@ -36,6 +37,9 @@ Lithium, C2ME, FerriteCore and ServerCore, not to replace them.
 | `/tickengine rules entities set <ai> <tick> <target>` | Entity rule: AI interval and far-tick interval (`minecraft:villager` or a whole mod like `somemod:*`) |
 | `/tickengine rules <blockentities\|entities> set-in <dimension> ... <target>` | Same, only in one dimension (`*` = every type there); needs `dimensionRulesEnabled` in that section |
 | `/tickengine rules <blockentities\|entities> remove <target>` / `remove-in <dimension> <target>` | Delete a rule |
+| `/tickengine tuning status` | Auto-tuning level and the values in use right now |
+| `/tickengine tuning pause` / `resume` | Stop or restart automatic level changes |
+| `/tickengine tuning level <n>` | Force a level (pauses automatic changes until `resume`) |
 
 ## Permissions
 
@@ -84,12 +88,31 @@ Players are never throttled. Around the nearest player:
 - Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
 - Entities only tick within the server's simulation distance, so keep `aiRadiusChunks` below it.
 
-### ServerCore
+## How auto-tuning works
 
-If ServerCore is installed with its entity activation range enabled, TickEngine pauses its own entity
-throttling (profiler and block entity throttling keep running), so entities are not throttled twice.
-Admins get a notice on join and every `notices.intervalMinutes` (30) while the conflict lasts. Turn this
-off with `compatibility.disableEntityThrottleWithServerCore` or `notices.enabled`.
+Every `autoTuning.decisionSeconds` (10) TickEngine looks at the average MSPT over that time. Above
+`raiseAboveMspt` (45 ms) it tightens one level; below `lowerBelowMspt` (30 ms) it relaxes one level.
+Levels tighten in this order, least visible first, and relax in reverse:
+
+1. default throttle intervals, through safe values only: 4, 5, 10, 20 (explicit rules are never changed)
+2. throttle radii, one chunk per level (block entities down to 2, entity full radius to 1, AI radius to 2)
+3. simulation distance, one per level, down to 4
+4. view distance, one per level, down to 6
+
+Every limit and step is configurable. Auto-tuning is runtime only: it never writes the config file or
+server.properties, starts at level 0 after a restart, and puts the original distances back when it
+relaxes or the server stops. Each level change is logged and, with `autoTuning.notifyAdmins`, sent to admins.
+
+## ServerCore
+
+- **Entity activation range:** if it is enabled, TickEngine pauses its own entity throttling (profiler
+  and block entity throttling keep running), so entities are not throttled twice.
+- **Dynamic settings:** if they are enabled, ServerCore manages simulation and view distance and
+  TickEngine's auto-tuning only adjusts its own throttles.
+
+Admins get a notice on join and every `notices.intervalMinutes` (30) while either applies. Turn this off
+with `compatibility.disableEntityThrottleWithServerCore`, `autoTuning.tuneSimulationDistance` and
+`tuneViewDistance`, or `notices.enabled`.
 
 ## Building
 

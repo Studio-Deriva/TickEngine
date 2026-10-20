@@ -1,5 +1,6 @@
 package com.studioderiva.tickengine.report;
 
+import com.studioderiva.tickengine.command.TickEngineCommand;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import java.io.IOException;
@@ -98,6 +99,7 @@ public final class HtmlReport {
 		stat(html, "Server MSPT now", format(server.getAverageTickTimeNanos() / 1_000_000.0) + " ms");
 		long measured = snapshot.entries.stream().mapToLong(ProfileSnapshot.Entry::totalNanos).sum();
 		stat(html, "Explained by types", format(snapshot.percentOfTick(measured)) + " %");
+		stat(html, "Auto-tuning now", TickEngineCommand.tuningSummary(server));
 		html.append("</div>\n");
 
 		html.append("<h2>By mod</h2>\n");
