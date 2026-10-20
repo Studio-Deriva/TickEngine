@@ -27,6 +27,10 @@ loom {
 		server {
 			runDir "run"
 		}
+		// Only for testing against the dev server: TickEngine itself does nothing on the client.
+		client {
+			runDir "run-client"
+		}
 	}
 }
 

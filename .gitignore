@@ -16,8 +16,9 @@ classes/
 .vscode/
 bin/
 
-# Dev server
+# Dev server and test client
 run/
+run-client/
 
 # OS
 .DS_Store

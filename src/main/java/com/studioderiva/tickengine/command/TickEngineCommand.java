@@ -288,8 +288,11 @@ public final class TickEngineCommand {
 			if (entry.worstPos() != null) {
 				String dimension = entry.worstDimension().identifier().toString();
 				String coordinates = entry.worstPos().getX() + " " + entry.worstPos().getY() + " " + entry.worstPos().getZ();
+				// Land on top of a block entity instead of inside it, where a player would suffocate.
+				int landingY = entry.worstPos().getY() + (category == ProfileSnapshot.Category.BLOCK_ENTITY ? 1 : 0);
+				String landing = entry.worstPos().getX() + " " + landingY + " " + entry.worstPos().getZ();
 				name = name.withStyle(style -> style
-					.withClickEvent(new ClickEvent.RunCommand("/execute in " + dimension + " run tp @s " + coordinates))
+					.withClickEvent(new ClickEvent.RunCommand("/execute in " + dimension + " run tp @s " + landing))
 					.withHoverEvent(new HoverEvent.ShowText(Component.literal(
 						"Slowest instance: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one tick\n"
 							+ dimension + " " + coordinates + "\nClick to teleport")))
