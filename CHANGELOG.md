@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: lowering `autoTuning.relaxAfterSeconds` while the server runs (by command or config reload)
+  now applies at the next decision. Before, the old wait stayed in force for up to 10 minutes and
+  `/tickengine tuning status` kept showing it.
+- Unit tests for auto-tuning, run inside Fabric Loader: `./gradlew test`.
+
 ## 1.0.0-beta.1 — first public beta
 
 - Tick profiler: an always-on light mode (one tick sampled per second) and detailed sessions, ranked by

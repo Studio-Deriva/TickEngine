@@ -203,7 +203,8 @@ With LuckPerms (or any fabric-permissions-api provider) use these nodes:
 ## Building from source
 
 ```
-./gradlew build          # jar in build/libs/
+./gradlew build          # jar in build/libs/ (also runs the tests)
+./gradlew test           # unit tests only
 ./gradlew runServer      # dev server in run/
 ```
 
