@@ -253,10 +253,14 @@ The audit above was done on the Fabric version. The Forge port was checked separ
 - **Modpack with a real client.** A 16-mod Forge 1.20.1 pack (Iron's Spells 'n Spellbooks, Spartan
   Weaponry and Shields, JCraft, Curios, GeckoLib, Watut and libraries) with a player connected: zones
   follow the player, `/tickengine top` teleport, combat and mod content behaved normally.
+- **A heavy modpack.** ZOMBIEMANIA V2.2 C2: 252 server-side mods on Forge 1.20.1-47.4.8, including
+  Create, Alex's Mobs, Mutant Monsters, Immersive Engineering, Superb Warfare, Ad Astra, Sinytra
+  Connector, ModernFix and FerriteCore. TickEngine loaded with no mixin conflicts and logged no errors.
+  See the second benchmark below.
 
-**Benchmark.** Same modpack server, one player standing still, the load 6–8 chunks away from them
-(inside the spawn chunks, not force-loaded), fixed daytime, natural spawning off. Each line is one
-`/tickengine profile` session of 20–30 s that measures every tick.
+**Benchmark 1: vanilla load.** The 16-mod pack server, one player standing still, the load 6–8
+chunks away from them (inside the spawn chunks, not force-loaded), fixed daytime, natural spawning
+off. Each line is one `/tickengine profile` session of 20–30 s that measures every tick.
 
 | Load far from the player | TickEngine | ms per tick | TPS | Tick time saved |
 |---|---|---|---|---|
@@ -272,10 +276,43 @@ and hoppers from 0.76 to 0.18 ms (−76%); 75% of block entity ticks were skippe
 95% of block entity ticks were skipped and 95% of entity ticks were minimal. No mob was lost: all
 cows and villagers were still there at the end.
 
+**Benchmark 2: modded mobs in a 252-mod pack.** The ZOMBIEMANIA server, one player standing still,
+the load 7–9 chunks away from them, fixed night, natural spawning off. The load is 30 modded mob
+types (Alex's Mobs, Mutants and Zombies, Mutant Monsters, Zombie Extincion, Butcher, Guard Villagers,
+Miner Villager, OutpostZero) plus 200 furnaces and a Create kinetic network. Same method as above.
+
+| Load far from the player | TickEngine | ms per tick | TPS | Tick time saved |
+|---|---|---|---|---|
+| 480 modded mobs (16 per type) | throttling off | 26.0 | 20 | — |
+| same | throttling on | 9.15 | 20 | **65%** |
+| ~2100 modded mobs (64 per type) | throttling off | 88.0 | 11.3 | — |
+| same | throttling on | 27.5 | 20 | **69%** (TPS +77%) |
+
+Per mod, with ~2100 mobs: Alex's Mobs −66%, Mutants and Zombies −77%, Mutant Monsters −76%, Zombie
+Extincion −78%, Butcher −78%. Auto-tuning, turned on afterwards, stayed at level 0: the server was
+already below 45 ms per tick, so there was nothing to tighten.
+
+Modded content stayed correct while throttled:
+
+- **Multipart mobs.** Each anaconda and centipede segment is an entity of its own and is throttled on
+  its own. The segments stayed together: 100 anaconda segments were on average 0.83 blocks from the
+  one before, 0.95 at most.
+- **Create.** A millstone driven by a creative motor kept working far from the player, at a quarter
+  of the speed (1 wheat in 616 ticks, against 4 in 617 with throttling off). It slows down in
+  proportion; it does not stall.
+- **Predators and prey.** Anacondas hunting gazelles and emus kept all three at full speed most of
+  the time, because mobs in combat are never throttled. That is why Alex's Mobs saved less than the
+  zombie mods.
+
+With the player inside the pen, nothing near them is throttled, and the server ran at 65–80 ms per
+tick while auto-tuning tightened (values read during the flight, not a profile session): far-away
+throttling cannot help with a load the player is standing in.
+
 What these numbers do and do not show:
 
 - One run per line on one Mac; the same "off" setup measured twice gave 98.3
-  and 90.7 ms, so allow about ±8%.
+  and 90.7 ms, so allow about ±8%. In benchmark 2 predators also ate some of the load during the runs
+  (2157 mobs down to 2085).
 - Trust the total ms per tick. Per-type times understate the throttled cost, because minimal ticks
   are not timed.
 - Lowering the simulation distance did not help here: spawn chunks stay loaded whatever it is set
