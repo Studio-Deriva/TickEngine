@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-beta.2+1.20.1-forge
+
+Made for personal use; support and updates are not guaranteed.
+
+- New, experimental and off by default: tick spreading (`/tickengine spread`), as in the Fabric
+  version's 1.0.0-beta.2. Turned on only after a warning in chat and the typed phrase
+  `/tickengine spread confirm I understand the risks`; it moves each entity's tick counter once by 0-19
+  ticks after loading, so entities loaded together stop running their throttled turn on the same tick.
+  In a test with 1100 mobs right after a restart, the slowest 5% of ticks went from 35 to 11 ms.
+- Checked since beta.1: LuckPerms for Forge 5.4.102, ServerCore for Forge 1.5.2, Forge 47.2.0 to 47.4.8,
+  a client install and singleplayer, the Nether and the End, several players at once, and a 252-mod pack
+  with ModernFix, FerriteCore and Sinytra Connector. Installed but idle, TickEngine costs nothing
+  measurable.
+- More in-game tests (36 GameTests).
+
 ## 1.0.0-beta.1+1.20.1-forge — Forge 1.20.1 port (personal project)
 
 Made for personal use; support and updates are not guaranteed.
@@ -8,13 +23,7 @@ Made for personal use; support and updates are not guaranteed.
 - Differences from the Fabric version: permission nodes go through Forge's PermissionAPI instead of
   fabric-permissions-api; bosses are read from the `forge:bosses` tag instead of `c:bosses`; MixinExtras
   is bundled in the jar; clients without TickEngine can join.
-- Experimental and off by default: tick spreading (`/tickengine spread`), as in the Fabric version.
-  Turned on only after a warning and a typed confirmation; it moves each entity's
-  tick counter once by 0-19 ticks after loading, so entities loaded together stop running their throttled
-  turn on the same tick. In a test with 1100 mobs the slowest 5% of ticks went from 35 to 11 ms.
 - Tests: JUnit (`./gradlew test`) and in-game GameTests (`./gradlew runGameTestServer`).
-- Tested with LuckPerms for Forge 5.4.102, ServerCore for Forge 1.5.2, Forge 47.2.0 to 47.4.8, and a
-  252-mod pack with ModernFix, FerriteCore and Sinytra Connector.
 
 ## 1.0.0-beta.1 — first public beta
 
