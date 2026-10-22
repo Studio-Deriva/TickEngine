@@ -7,7 +7,8 @@
 >
 > Differences in this port: Forge 47.x instead of Fabric; permission nodes go through Forge's
 > PermissionAPI (LuckPerms for Forge can grant them); the boss tag is `forge:bosses` instead of
-> `c:bosses`. Tests: `./gradlew test` and `./gradlew runGameTestServer`.
+> `c:bosses`. Tests: `./gradlew test` and `./gradlew runGameTestServer`. How the port was tested and
+> what it saves on a modded Forge server: [Forge 1.20.1 port: tests and benchmark](#forge-1201-port-tests-and-benchmark).
 
 ---
 
@@ -229,6 +230,52 @@ of the audit behind this beta: 7 findings — mobs that never chose a goal while
 that wiped every setting, report paths outside the server folder and more — what each one was and what
 was changed to close it. It also has the performance measurements and says plainly what has **not**
 been verified yet.
+
+### Forge 1.20.1 port: tests and benchmark
+
+The audit above was done on the Fabric version. The Forge port was checked separately:
+
+- **Automated tests.** 8 JUnit tests (throttle rules) and 30 GameTests run inside a real Forge server
+  (`./gradlew runGameTestServer`). They measure throttling on real furnaces, items and mobs, and also
+  cover exemptions, zones, rules, the goal-selection fix, the profiler and HTML reports, commands,
+  permissions, auto-tuning under load and config file handling. To check that the tests can fail,
+  three throttling mechanisms were broken on purpose; 10 tests failed, at least one per break.
+- **Production jar on a real server.** Forge 1.20.1-47.4.0 server from the official installer: mixins
+  applied, MixinExtras loaded from the bundled jar, throttling rates as expected, clean shutdown.
+- **Modpack with a real client.** A 16-mod Forge 1.20.1 pack (Iron's Spells 'n Spellbooks, Spartan
+  Weaponry and Shields, JCraft, Curios, GeckoLib, Watut and libraries) with a player connected: zones
+  follow the player, `/tickengine top` teleport, combat and mod content behaved normally.
+
+**Benchmark.** Same modpack server, one player standing still, the load 6–8 chunks away from them
+(inside the spawn chunks, not force-loaded), fixed daytime, natural spawning off. Each line is one
+`/tickengine profile` session of 20–30 s that measures every tick.
+
+| Load far from the player | TickEngine | ms per tick | TPS | Tick time saved |
+|---|---|---|---|---|
+| 1536 cows, 320 villagers, 400 furnaces, 400 hoppers | throttling off | 94.5 | ~10.6 | — |
+| same | throttling on | 38.1 | 20 | **60%** |
+| same | throttling + auto-tuning | 34.1 | 20 | **64%** |
+| 3072 cows, 640 villagers, 400 furnaces, 400 hoppers | throttling off | 253 | 3.96 | — |
+| same | throttling + auto-tuning | 51.3 | 19.5 | **80%** (TPS ×4.9) |
+| same, player standing inside the load | throttling on | 224 | 4.35 | 11% |
+
+With the first load, cows went from 47 to 10 ms per tick (−79%), villagers from 23 to 7.5 ms (−68%)
+and hoppers from 0.76 to 0.18 ms (−76%); 75% of block entity ticks were skipped. With the double load,
+95% of block entity ticks were skipped and 95% of entity ticks were minimal. No mob was lost: all
+cows and villagers were still there at the end.
+
+What these numbers do and do not show:
+
+- One run per line on one Mac; the same "off" setup measured twice gave 98.3
+  and 90.7 ms, so allow about ±8%.
+- Trust the total ms per tick. Per-type times understate the throttled cost, because minimal ticks
+  are not timed.
+- Lowering the simulation distance did not help here: spawn chunks stay loaded whatever it is set
+  to. On a server whose load is outside the spawn chunks, that auto-tuning step can save more.
+- TickEngine only saves time far from players. With the player inside the load, almost nothing was
+  throttled, and that is by design.
+- The cost of TickEngine itself was not measured on its own: that needs a run without the mod
+  installed.
 
 ## Contributing
 
