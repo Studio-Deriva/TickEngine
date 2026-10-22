@@ -18,6 +18,7 @@ import com.studioderiva.tickengine.report.HtmlReport;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import com.studioderiva.tickengine.tuning.AutoTuner;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,6 +55,7 @@ import net.minecraft.server.permissions.PermissionLevel;
  * /tickengine rules entities list | set &lt;ai&gt; &lt;tick&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;ai&gt; &lt;tick&gt; &lt;target&gt;
  *                            | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
  * /tickengine tuning status | pause | resume | level &lt;n&gt;
+ * /tickengine spread [enable | confirm &lt;phrase&gt; | disable]
  * </pre>
  *
  * <p>Rule targets go last as greedy text because ids contain ':' which single-word
@@ -110,7 +112,15 @@ public final class TickEngineCommand {
 				.then(Commands.literal("resume").executes(TickEngineCommand::tuningResume))
 				.then(Commands.literal("level")
 					.then(Commands.argument("level", IntegerArgumentType.integer(0))
-						.executes(TickEngineCommand::tuningLevel)))));
+						.executes(TickEngineCommand::tuningLevel))))
+			.then(Commands.literal("spread")
+				.requires(permission("config"))
+				.executes(TickEngineCommand::spreadStatus)
+				.then(Commands.literal("enable").executes(TickEngineCommand::spreadEnable))
+				.then(Commands.literal("confirm")
+					.then(Commands.argument("phrase", StringArgumentType.greedyString())
+						.executes(TickEngineCommand::spreadConfirm)))
+				.then(Commands.literal("disable").executes(TickEngineCommand::spreadDisable))));
 	}
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
@@ -242,6 +252,100 @@ public final class TickEngineCommand {
 		source.sendSuccess(() -> Component.literal("Auto-tuning set to level " + set
 			+ (set != requested ? " (highest available)" : "") + " and paused. Use '/tickengine tuning resume' to let it "
 			+ "adjust again.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	// --- spread ---
+
+	/** What has to be typed after '/tickengine spread confirm' to turn tick spreading on. */
+	static final String SPREAD_PHRASE = "I understand the risks";
+	private static final long SPREAD_CONFIRM_MILLIS = 60_000;
+	/** Who asked to turn spreading on, and until when they may confirm. */
+	private static final Map<String, Long> pendingSpreadConfirmations = new HashMap<>();
+
+	private static int spreadStatus(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Tick spreading (experimental)"), false);
+		source.sendSuccess(() -> line("State", TickEngineConfig.spreadEntityTicks ? "on" : "off",
+			TickEngineConfig.spreadEntityTicks ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		spreadExplanation(source);
+		source.sendSuccess(() -> Component.literal(TickEngineConfig.spreadEntityTicks
+			? " Turn it off with '/tickengine spread disable'."
+			: " Turn it on with '/tickengine spread enable'.").withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static void spreadExplanation(CommandSourceStack source) {
+		source.sendSuccess(() -> line("What it does", "moves each entity's tick counter forward once, by 0-19 ticks, "
+			+ EntityThrottle.SPREAD_AT_TICK / 20 + " s after it is loaded (and right away for entities already loaded).",
+			ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Gain", "throttled entities loaded together (after a restart, in spawn or "
+			+ "force-loaded chunks) stop running their full tick on the same tick. The work is spread evenly instead of "
+			+ "one heavy tick every few: fewer tick spikes. In our test (1100 mobs loaded together after a restart) the "
+			+ "slowest 5% of ticks went from 35 to 11 ms and the slowest tick from 55 to 21 ms; the average MSPT did not "
+			+ "change.", ChatFormatting.GREEN), false);
+		source.sendSuccess(() -> line("Risk", "logic that waits for one exact tick counter value in that short range can "
+			+ "be skipped once per load, and timers based on the counter (like 'hurt recently') can end up to 19 ticks "
+			+ "early once. Vanilla does not wait for exact values there; some mods might. If a mob or machine from a mod "
+			+ "misbehaves after turning this on, turn it off and tell us which one.", ChatFormatting.YELLOW), false);
+	}
+
+	private static int spreadEnable(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		if (TickEngineConfig.spreadEntityTicks) {
+			source.sendSuccess(() -> Component.literal("Tick spreading is already on.").withStyle(ChatFormatting.GRAY), false);
+			return 1;
+		}
+		pendingSpreadConfirmations.put(source.getTextName(), System.currentTimeMillis() + SPREAD_CONFIRM_MILLIS);
+		source.sendSuccess(() -> header("Tick spreading: read before turning it on"), false);
+		spreadExplanation(source);
+		String command = "/tickengine spread confirm " + SPREAD_PHRASE;
+		source.sendSuccess(() -> Component.literal(" To turn it on, within " + SPREAD_CONFIRM_MILLIS / 1000 + " s type: ")
+			.withStyle(ChatFormatting.GOLD)
+			.append(Component.literal(command).withStyle(style -> style
+				.withColor(ChatFormatting.WHITE)
+				.withUnderlined(true)
+				.withClickEvent(new ClickEvent.SuggestCommand(command))
+				.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to put it in the chat box"))))),
+			false);
+		return 1;
+	}
+
+	private static int spreadConfirm(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		Long deadline = pendingSpreadConfirmations.get(source.getTextName());
+		if (deadline == null || System.currentTimeMillis() > deadline) {
+			pendingSpreadConfirmations.remove(source.getTextName());
+			source.sendFailure(Component.literal("Nothing to confirm. Run '/tickengine spread enable' first and read the warning."));
+			return 0;
+		}
+		if (!StringArgumentType.getString(context, "phrase").trim().equalsIgnoreCase(SPREAD_PHRASE)) {
+			source.sendFailure(Component.literal("The phrase does not match. Type exactly: /tickengine spread confirm "
+				+ SPREAD_PHRASE));
+			return 0;
+		}
+		pendingSpreadConfirmations.remove(source.getTextName());
+		TickEngineConfig.spreadEntityTicks = true;
+		TickEngineConfig.changed();
+		int moved = EntityThrottle.spreadLoadedEntities(source.getServer());
+		TickEngine.LOGGER.info("Tick spreading turned on by {}; {} loaded entities moved.", source.getTextName(), moved);
+		source.sendSuccess(() -> Component.literal("Tick spreading is on and saved to the config file; " + moved
+			+ " loaded entities were moved. Turn it off any time with '/tickengine spread disable'.")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int spreadDisable(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		pendingSpreadConfirmations.remove(source.getTextName());
+		if (!TickEngineConfig.spreadEntityTicks) {
+			source.sendSuccess(() -> Component.literal("Tick spreading is already off.").withStyle(ChatFormatting.GRAY), false);
+			return 1;
+		}
+		TickEngineConfig.spreadEntityTicks = false;
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Tick spreading is off. Counters already moved stay as they are until "
+			+ "those entities are loaded again; that is harmless.").withStyle(ChatFormatting.GREEN), true);
 		return 1;
 	}
 
@@ -447,6 +551,11 @@ public final class TickEngineCommand {
 		CommandSourceStack source = context.getSource();
 		TickEngineConfig.Option<?> option = option(source, StringArgumentType.getString(context, "key"));
 		if (option == null) {
+			return 0;
+		}
+		if (option.confirmCommand() != null) {
+			source.sendFailure(Component.literal(option.key + " has risks and can only be changed with '"
+				+ option.confirmCommand() + "', which explains them and asks for confirmation."));
 			return 0;
 		}
 		String previous = option.format();

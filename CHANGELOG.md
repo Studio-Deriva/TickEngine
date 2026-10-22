@@ -1,12 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Fixed: lowering `autoTuning.relaxAfterSeconds` while the server runs (by command or config reload)
-  now applies at the next decision. Before, the old wait stayed in force for up to 10 minutes and
-  `/tickengine tuning status` kept showing it.
-- Unit tests for auto-tuning, run inside Fabric Loader: `./gradlew test`.
-
 ## 1.0.0-beta.1 — first public beta
 
 - Tick profiler: an always-on light mode (one tick sampled per second) and detailed sessions, ranked by
@@ -30,6 +23,12 @@
   `.config`, `.notify`. Bare `/tickengine` shows the status only with `tickengine.status`.
 - ServerCore: entity throttling pauses while its activation range is on; auto-tuning leaves the
   distances to its dynamic settings. Admins are told on join and every 30 minutes.
+- Experimental and off by default: tick spreading (`/tickengine spread`). Entities loaded together
+  share their throttled turn, which makes one tick in a few heavier than normal. When turned on (after a
+  warning and a typed confirmation), each entity's tick counter is moved once by 0-19 ticks after it is
+  loaded, which spreads the work: in a test with 1100 mobs, the slowest 5% of ticks went from 35 to 11 ms.
+  `/tickengine config set` cannot turn it on.
+- Unit tests for auto-tuning, run inside Fabric Loader: `./gradlew test`.
 
 The full account of the audit behind this release, the performance measurements and what has not been
 verified are in `HOW_WE_VERIFIED_AND_FIXED_THE_BUGS.txt`.

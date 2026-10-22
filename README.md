@@ -99,7 +99,8 @@ Players are never throttled. Around the nearest player:
 | beyond | the full tick once every `tick` ticks (default 4); in between only timers advance (item and XP despawn, mob idle time, portal cooldown, burning time) |
 
 - Throttled ticks follow each entity's own tick counter, so logic like "every 40 ticks" (item merging)
-  keeps working with intervals 2, 4, 5, 10 or 20, and the work is spread over different ticks.
+  keeps working with intervals 2, 4, 5, 10 or 20. Entities loaded at different times run their turns
+  on different ticks; entities loaded together share a counter and so a turn (see Tick spreading).
 - When a throttled mob gets its AI turn, it always runs a full goal selection, so far mobs still start
   and stop behaviours (eating grass, picking targets, fleeing).
 - Never throttled by default: projectiles, entities carrying passengers, bosses (`c:bosses` tag), mobs in
@@ -110,6 +111,23 @@ Players are never throttled. Around the nearest player:
   the first `newEntitySeconds` after spawning or loading, animals in love and babies.
 - Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
 - Entities only tick within the server's simulation distance, so keep `aiRadiusChunks` below it.
+
+### Tick spreading (experimental, off by default)
+
+Entities loaded together (after a restart, in spawn chunks, in force-loaded chunks) start with the
+same tick counter, so all their throttled turns land on the same tick: the average MSPT drops, but
+every few ticks one tick is heavier than a normal tick would be. Measured on a test server right
+after a restart, with 1100 mobs: average 9.2 ms, but 5% of ticks over 35 ms and the slowest at 55 ms.
+
+`/tickengine spread enable` explains what it does and asks you to confirm with
+`/tickengine spread confirm I understand the risks`. When on, each entity's counter is moved forward
+once, by 0–19 ticks, 5 seconds after it is loaded (and right away for entities already loaded), so
+the turns spread out. Same test with it on: average 9.3 ms, 5% of ticks over 10.8 ms, slowest 21 ms.
+
+The risk: logic that waits for one exact counter value in that short range can be skipped once per
+load, and counter-based timers such as "hurt recently" can end up to 19 ticks early once. Vanilla does
+not wait for exact values there; some mods might. `/tickengine spread disable` turns it off;
+`/tickengine config set` cannot change it.
 
 ## How auto-tuning works
 
@@ -176,11 +194,13 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine tuning status` | Auto-tuning level and the values in use right now |
 | `/tickengine tuning pause` / `resume` | Stop or restart automatic level changes |
 | `/tickengine tuning level <n>` | Force a level (pauses automatic changes until `resume`) |
+| `/tickengine spread` | Tick spreading: state, what it does, gain and risk |
+| `/tickengine spread enable` / `confirm <phrase>` / `disable` | Turn tick spreading on (after reading the warning and typing the phrase) or off |
 
 ## Permissions
 
 Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
-With LuckPerms (or any fabric-permissions-api provider) use these nodes:
+With LuckPerms (tested with 5.5.21) or any fabric-permissions-api provider, use these nodes:
 `tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
 `tickengine.notify` for admin notices (auto-tuning changes, the ServerCore notices below).
 
@@ -217,6 +237,14 @@ of the audit behind this beta: 7 findings — mobs that never chose a goal while
 that wiped every setting, report paths outside the server folder and more — what each one was and what
 was changed to close it. It also has the performance measurements and says plainly what has **not**
 been verified yet.
+
+Checked after the audit:
+
+- **LuckPerms 5.5.21**: granted and denied nodes, the fall back to the operator level when a node is
+  not set, and admin notices only for players with `tickengine.notify`.
+- **Tick spikes.** The audit saw the slowest ticks get worse with throttling and guessed at block
+  entity stagger. Measured since: the cause is entities loaded together sharing their throttled turn.
+  Tick spreading (above) fixes it, as an opt-in; measured on the Forge port, which runs the same code.
 
 ## Contributing
 
