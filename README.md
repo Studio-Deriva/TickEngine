@@ -1,6 +1,19 @@
+# FORGE 1.20.1 PORT: PERSONAL PROJECT, NO SUPPORT GUARANTEED
+
+> **This Forge 1.20.1 version of TickEngine was made for personal use.**
+> **Support and updates are not guaranteed:** it may lag behind the Fabric version, fixes may never
+> be ported, and it may be dropped at any time. Use it at your own risk and keep a backup of your
+> world. The maintained version is TickEngine for Fabric 1.21.11, on the `main` branch.
+>
+> Differences in this port: Forge 47.x instead of Fabric; permission nodes go through Forge's
+> PermissionAPI (LuckPerms for Forge can grant them); the boss tag is `forge:bosses` instead of
+> `c:bosses`. Tests: `./gradlew test` and `./gradlew runGameTestServer`.
+
+---
+
 # TickEngine
 
-Server-side tick profiler and throttling for Fabric 1.21.11, by [Studio Deriva](https://discord.gg/pQPWr7vfHu).
+Server-side tick profiler and throttling for Fabric 1.21.11 (this branch: Forge 1.20.1), by [Studio Deriva](https://discord.gg/pQPWr7vfHu).
 
 TickEngine shows where your server's tick time goes — per mod, per block entity type, per entity
 type — and makes the things far from every player cost less: machines, hoppers and furnaces tick less

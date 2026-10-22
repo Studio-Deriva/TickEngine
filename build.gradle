@@ -11,6 +11,19 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
+sourceSets {
+	gametest {
+		compileClasspath += sourceSets.main.output
+		runtimeClasspath += sourceSets.main.output
+	}
+}
+
+configurations {
+	gametestImplementation.extendsFrom implementation
+	gametestCompileOnly.extendsFrom compileOnly
+	gametestRuntimeOnly.extendsFrom runtimeOnly
+}
+
 minecraft {
 	mappings channel: 'official', version: project.minecraft_version
 	copyIdeResources = true
@@ -33,7 +46,21 @@ minecraft {
 		client {
 			workingDirectory project.file('run-client')
 		}
+		// In-game tests (src/gametest, not shipped): ./gradlew runGameTestServer
+		gameTestServer {
+			workingDirectory project.file('run-gametest')
+			property 'forge.enabledGameTestNamespaces', 'tickengine'
+			mods {
+				tickengine {
+					source sourceSets.gametest
+				}
+			}
+		}
 	}
+}
+
+test {
+	useJUnitPlatform()
 }
 
 mixin {
@@ -51,6 +78,9 @@ dependencies {
 	minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
 
 	annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
 
 	// Forge 1.20.1 does not ship MixinExtras: bundle it (~100 KB).
 	compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:${project.mixin_extras_version}"))

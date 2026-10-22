@@ -238,9 +238,11 @@ public final class EntityThrottle {
 
 	/**
 	 * True while a throttled mob runs its AI on its turn. Vanilla alternates a full goal
-	 * selection and a running-goals-only update on the parity of {@code tickCount + id}; since
-	 * throttled turns fall on multiples of the interval, an even interval would leave mobs with
-	 * an odd id on the partial update forever, so they would never start or stop a goal.
+	 * selection and a running-goals-only update on the parity of the server tick count plus the
+	 * entity id; since throttled turns fall on multiples of the interval of the entity's own
+	 * tickCount, which differs from the server tick count by a fixed offset, an even interval
+	 * would leave about half of the mobs on the partial update forever, so they would never start
+	 * or stop a goal.
 	 */
 	public static boolean isThrottledRun(Entity entity) {
 		return currentEntity == entity && currentMode == Mode.THROTTLED_FULL;

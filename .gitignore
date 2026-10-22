@@ -20,9 +20,11 @@ bin/
 # Dev server and test client
 run/
 run-client/
+run-gametest/
 
 # OS
 .DS_Store
 
 # Publication assets and private notes (not part of the mod)
 docs/
+logs/
