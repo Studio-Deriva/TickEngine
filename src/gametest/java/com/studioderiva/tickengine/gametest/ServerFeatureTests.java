@@ -221,6 +221,40 @@ public final class ServerFeatureTests {
 		});
 	}
 
+	/**
+	 * Lowering relaxAfterSeconds while tuned up must apply from the next decision, not only after
+	 * ten calm minutes. Decisions every 40 ticks: with the old 60 s wait this would take 1200 ticks.
+	 */
+	@GameTest(template = "floor", batch = "tuning_relax_setting", timeoutTicks = 600)
+	public static void loweringRelaxAfterSecondsAppliesAtOnce(GameTestHelper helper) {
+		configure(helper, "autoTuning.enabled", "true", "autoTuning.decisionSeconds", "2", "autoTuning.raiseAboveMspt", "45",
+			"autoTuning.lowerBelowMspt", "30", "autoTuning.relaxAfterSeconds", "60");
+		int[] calmTicks = {-1};
+		helper.onEachTick(() -> {
+			if (calmTicks[0] < 0) {
+				if (AutoTuner.level() == 0) {
+					long until = System.nanoTime() + 60_000_000L;
+					while (System.nanoTime() < until) {
+						Thread.onSpinWait();
+					}
+					return;
+				}
+				calmTicks[0] = 0;
+				return;
+			}
+			calmTicks[0]++;
+			if (calmTicks[0] == 100) {
+				check(AutoTuner.level() > 0, "relaxed before the 60 s wait was over");
+				check(run(helper, "/tickengine config set autoTuning.relaxAfterSeconds 0").result() == 1, "set relaxAfterSeconds");
+				check(run(helper, "/tickengine tuning status").text().contains("for 0 s"), "tuning status still shows the old wait");
+			} else if (calmTicks[0] > 100 && AutoTuner.level() == 0) {
+				check(calmTicks[0] <= 100 + 3 * 40, "took " + (calmTicks[0] - 100) + " ticks to relax after lowering the wait");
+				configure(helper);
+				helper.succeed();
+			}
+		});
+	}
+
 	// --- config file ---
 
 	@GameTest(template = "floor", batch = "config_file", timeoutTicks = 100)

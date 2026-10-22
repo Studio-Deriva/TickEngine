@@ -63,6 +63,8 @@ public final class AutoTuner {
 
 	/** Current wait before relaxing; grows when relaxing is followed by tightening again. */
 	private static int relaxWaitSeconds = -1;
+	/** The relaxAfterSeconds value the current wait started from; -1 when there is none yet. */
+	private static int relaxWaitBase = -1;
 	private static int lowSeconds;
 	private static int secondsSinceRelax = Integer.MAX_VALUE;
 	private static int secondsSinceRaise = Integer.MAX_VALUE;
@@ -108,8 +110,12 @@ public final class AutoTuner {
 		int elapsed = TickEngineConfig.decisionSeconds;
 		secondsSinceRelax = saturatedAdd(secondsSinceRelax, elapsed);
 		secondsSinceRaise = saturatedAdd(secondsSinceRaise, elapsed);
-		if (relaxWaitSeconds < TickEngineConfig.relaxAfterSeconds || secondsSinceRaise >= CALM_SECONDS) {
+		if (relaxWaitSeconds < TickEngineConfig.relaxAfterSeconds || secondsSinceRaise >= CALM_SECONDS
+			// A changed setting (lowered too) starts over from the new value: otherwise a wait
+			// based on the old one would hide the change until CALM_SECONDS pass.
+			|| relaxWaitBase != TickEngineConfig.relaxAfterSeconds) {
 			relaxWaitSeconds = TickEngineConfig.relaxAfterSeconds;
+			relaxWaitBase = TickEngineConfig.relaxAfterSeconds;
 		}
 		if (lastAverageMspt > TickEngineConfig.raiseAboveMspt && level < maxLevel) {
 			if (TickEngineConfig.relaxAfterSeconds > 0 && secondsSinceRelax <= 2 * relaxWaitSeconds) {
@@ -172,6 +178,7 @@ public final class AutoTuner {
 
 	private static void resetRelaxState() {
 		relaxWaitSeconds = -1;
+		relaxWaitBase = -1;
 		lowSeconds = 0;
 		secondsSinceRelax = Integer.MAX_VALUE;
 		secondsSinceRaise = Integer.MAX_VALUE;
@@ -367,6 +374,10 @@ public final class AutoTuner {
 
 	/** Seconds the MSPT must stay low before the next relax step. */
 	public static int relaxWaitSeconds() {
+		if (relaxWaitBase != TickEngineConfig.relaxAfterSeconds) {
+			// Changed since the last decision: the next one starts over from the new value.
+			return TickEngineConfig.relaxAfterSeconds;
+		}
 		return Math.max(relaxWaitSeconds, TickEngineConfig.relaxAfterSeconds);
 	}
 
