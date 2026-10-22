@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0-beta.2
+
+- New, experimental and off by default: tick spreading (`/tickengine spread`). Entities loaded together
+  (after a restart, in spawn or force-loaded chunks) share their throttled turn, which makes one tick in a
+  few heavier than a normal tick. When turned on, after a warning in chat and the typed phrase
+  `/tickengine spread confirm I understand the risks`, each entity's tick counter is moved once by 0-19
+  ticks after it is loaded, which spreads the work. In a test with 1100 mobs right after a restart, the
+  slowest 5% of ticks went from 35 to 11 ms and the slowest tick from 55 to 21 ms; the average did not
+  change. `/tickengine config set` cannot turn it on.
+- Checked since beta.1: LuckPerms 5.5.21 (granted and denied nodes, fall back to the operator level,
+  notices only with `tickengine.notify`).
+
 ## 1.0.0-beta.1 — first public beta
 
 - Tick profiler: an always-on light mode (one tick sampled per second) and detailed sessions, ranked by
@@ -23,11 +35,6 @@
   `.config`, `.notify`. Bare `/tickengine` shows the status only with `tickengine.status`.
 - ServerCore: entity throttling pauses while its activation range is on; auto-tuning leaves the
   distances to its dynamic settings. Admins are told on join and every 30 minutes.
-- Experimental and off by default: tick spreading (`/tickengine spread`). Entities loaded together
-  share their throttled turn, which makes one tick in a few heavier than normal. When turned on (after a
-  warning and a typed confirmation), each entity's tick counter is moved once by 0-19 ticks after it is
-  loaded, which spreads the work: in a test with 1100 mobs, the slowest 5% of ticks went from 35 to 11 ms.
-  `/tickengine config set` cannot turn it on.
 - Unit tests for auto-tuning, run inside Fabric Loader: `./gradlew test`.
 
 The full account of the audit behind this release, the performance measurements and what has not been
