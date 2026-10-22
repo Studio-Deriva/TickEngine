@@ -1,0 +1,29 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+issueTrackerURL="https://discord.gg/pQPWr7vfHu"
+
+[[mods]]
+modId="tickengine"
+version="${version}"
+displayName="TickEngine"
+displayURL="https://github.com/Studio-Deriva/TickEngine"
+logoFile="assets/tickengine/icon.png"
+authors="Studio Deriva"
+description='''Server-side tick profiler and configurable throttling to run heavy modpacks on weak hardware.'''
+# Server-side only: clients without TickEngine can join.
+displayTest="IGNORE_ALL_VERSION"
+
+[[dependencies.tickengine]]
+modId="forge"
+mandatory=true
+versionRange="${forge_version_range}"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.tickengine]]
+modId="minecraft"
+mandatory=true
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"

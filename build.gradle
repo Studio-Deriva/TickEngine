@@ -1,67 +1,111 @@
 plugins {
-	id 'fabric-loom' version "${loom_version}"
-}
-
-repositories {
-	mavenCentral()
+	id 'eclipse'
+	id 'idea'
+	id 'net.minecraftforge.gradle' version '[6.0.24,6.2)'
+	id 'org.spongepowered.mixin' version '0.7.+'
 }
 
 base {
 	archivesName = project.archives_base_name
 }
 
-dependencies {
-	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings loom.officialMojangMappings()
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
-	// Bundled (~12 KB): permission nodes work with LuckPerms when present,
-	// and fall back to vanilla operator levels otherwise.
-	include(modImplementation("me.lucko:fabric-permissions-api:${project.fabric_permissions_api_version}"))
-}
+minecraft {
+	mappings channel: 'official', version: project.minecraft_version
+	copyIdeResources = true
 
-loom {
-	// TickEngine is server-side only: run a dedicated server for development.
 	runs {
+		configureEach {
+			workingDirectory project.file('run')
+			property 'forge.logging.console.level', 'info'
+			mods {
+				tickengine {
+					source sourceSets.main
+				}
+			}
+		}
+		// TickEngine is server-side only: run a dedicated server for development.
 		server {
-			runDir "run"
+			args '--nogui'
 		}
 		// Only for testing against the dev server: TickEngine itself does nothing on the client.
 		client {
-			runDir "run-client"
+			workingDirectory project.file('run-client')
 		}
 	}
 }
 
-processResources {
-	def version = project.version
-	inputs.property "version", version
+mixin {
+	add sourceSets.main, 'tickengine.refmap.json'
+	config 'tickengine.mixins.json'
+}
 
-	filesMatching("fabric.mod.json") {
-		expand "version": version
+repositories {
+	mavenCentral()
+}
+
+jarJar.enable()
+
+dependencies {
+	minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
+
+	annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+	// Forge 1.20.1 does not ship MixinExtras: bundle it (~100 KB).
+	compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:${project.mixin_extras_version}"))
+	implementation(jarJar("io.github.llamalad7:mixinextras-forge:${project.mixin_extras_version}")) {
+		jarJar.ranged(it, "[${project.mixin_extras_version},)")
+	}
+}
+
+tasks.named('processResources', ProcessResources).configure {
+	def replaceProperties = [
+		version: project.version,
+		minecraft_version_range: project.minecraft_version_range,
+		forge_version_range: project.forge_version_range
+	]
+	inputs.properties replaceProperties
+
+	filesMatching('META-INF/mods.toml') {
+		expand replaceProperties
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 21
+	options.encoding = 'UTF-8'
+	options.compilerArgs << "-Xlint:deprecation"
 }
 
 java {
 	withSourcesJar()
-	sourceCompatibility = JavaVersion.VERSION_21
-	targetCompatibility = JavaVersion.VERSION_21
 }
 
-jar {
+tasks.named('jar', Jar).configure {
 	def projectName = project.name
 	inputs.property "projectName", projectName
 
 	from("LICENSE") {
 		rename { "${it}_$projectName" }
 	}
+	manifest {
+		attributes([
+			'Specification-Title'     : 'tickengine',
+			'Specification-Vendor'    : 'Studio Deriva',
+			'Specification-Version'   : '1',
+			'Implementation-Title'    : project.name,
+			'Implementation-Version'  : project.version,
+			'Implementation-Vendor'   : 'Studio Deriva',
+			'MixinConfigs'            : 'tickengine.mixins.json'
+		])
+	}
+	finalizedBy 'reobfJar'
 }
 
-tasks.withType(JavaCompile).configureEach {
-	it.options.compilerArgs << "-Xlint:deprecation"
+tasks.named('jarJar').configure {
+	archiveClassifier = ''
+	finalizedBy 'reobfJarJar'
+}
+tasks.named('jar', Jar).configure {
+	archiveClassifier = 'slim'
 }

@@ -8,7 +8,7 @@ import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -68,7 +68,7 @@ public final class BlockEntityThrottle {
 				}
 			}
 		}
-		forcedChunks = level.getForceLoadedChunks();
+		forcedChunks = level.getForcedChunks();
 	}
 
 	/** True when the block entity must not tick this game tick. */
@@ -111,10 +111,10 @@ public final class BlockEntityThrottle {
 		});
 		int interval = cache.getInt(type);
 		if (interval < 0) {
-			Identifier id = BlockEntityType.getKey(type);
+			ResourceLocation id = BlockEntityType.getKey(type);
 			// Unregistered types cannot be matched by rules: leave them alone.
 			interval = id == null ? 1 : TickEngineConfig.BLOCK_ENTITY_RULES.resolve(id,
-				preparedLevel.dimension().identifier(), TickEngineConfig.dimensionRulesEnabled,
+				preparedLevel.dimension().location(), TickEngineConfig.dimensionRulesEnabled,
 				AutoTuner.values().blockEntityInterval());
 			cache.put(type, interval);
 		}

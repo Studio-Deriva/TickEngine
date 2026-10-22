@@ -5,7 +5,7 @@ import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import java.util.ArrayList;
 import java.util.List;
-import me.lucko.fabric.api.permissions.v0.Permissions;
+import com.studioderiva.tickengine.permission.TickEnginePermissions;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -13,7 +13,6 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.PermissionLevel;
 
 /**
  * Tells admins about configuration problems: when they join, then every
@@ -21,8 +20,6 @@ import net.minecraft.server.permissions.PermissionLevel;
  * {@code permissions.commandOpLevel} or players with the {@code tickengine.notify} node.
  */
 public final class AdminNotices {
-	private static final String PERMISSION = TickEngine.MOD_ID + ".notify";
-
 	private static long ticksUntilRepeat;
 	private static boolean conflictLogged;
 
@@ -105,15 +102,15 @@ public final class AdminNotices {
 	}
 
 	private static boolean isAdmin(ServerPlayer player) {
-		return Permissions.check(player, PERMISSION, PermissionLevel.byId(TickEngineConfig.commandOpLevel));
+		return TickEnginePermissions.check(player, TickEnginePermissions.NOTIFY);
 	}
 
 	private static void send(ServerPlayer player, List<Component> problems) {
 		for (Component problem : problems) {
 			MutableComponent hide = Component.literal(" [hide notices]").withStyle(style -> style
 				.withColor(ChatFormatting.GRAY)
-				.withClickEvent(new ClickEvent.SuggestCommand("/tickengine config set notices.enabled false"))
-				.withHoverEvent(new HoverEvent.ShowText(Component.literal("Turn these notices off"))));
+				.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/tickengine config set notices.enabled false"))
+				.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Turn these notices off"))));
 			player.sendSystemMessage(Component.literal("[TickEngine] ").withStyle(ChatFormatting.DARK_AQUA)
 				.append(problem).append(hide));
 		}

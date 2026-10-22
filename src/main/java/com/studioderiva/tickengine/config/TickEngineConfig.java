@@ -3,7 +3,6 @@ package com.studioderiva.tickengine.config;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
 import com.studioderiva.tickengine.TickEngine;
 import java.io.IOException;
@@ -18,7 +17,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 /**
  * TickEngine configuration.
@@ -28,7 +27,7 @@ import net.fabricmc.loader.api.FabricLoader;
  * {@code /tickengine config} commands, so a new option only needs to be added here.
  */
 public final class TickEngineConfig {
-	private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("tickengine.json5");
+	private static final Path FILE = FMLPaths.CONFIGDIR.get().resolve("tickengine.json5");
 
 	// --- profiler ---
 	public static boolean profilerEnabled = true;
@@ -202,7 +201,7 @@ public final class TickEngineConfig {
 			"Never throttle entities that carry passengers (minecarts, boats, ridden mobs).",
 			() -> excludeVehicles, v -> excludeVehicles = v));
 		register(Option.bool("entities.excludeBosses",
-			"Never throttle bosses: entity types in the 'c:bosses' tag (Ender Dragon, Wither and modded\n"
+			"Never throttle bosses: entity types in the 'forge:bosses' tag (Ender Dragon, Wither and modded\n"
 				+ "bosses that use the tag).",
 			() -> excludeBosses, v -> excludeBosses = v));
 		register(Option.bool("entities.excludeCombat",
@@ -363,7 +362,7 @@ public final class TickEngineConfig {
 		if (Files.exists(FILE)) {
 			try (Reader reader = Files.newBufferedReader(FILE, StandardCharsets.UTF_8)) {
 				JsonReader json = new JsonReader(reader);
-				json.setStrictness(Strictness.LENIENT);
+				json.setLenient(true);
 				JsonObject root = JsonParser.parseReader(json).getAsJsonObject();
 				for (Option<?> option : OPTIONS.values()) {
 					JsonElement value = find(root, option.key);

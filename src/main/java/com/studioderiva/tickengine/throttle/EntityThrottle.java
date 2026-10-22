@@ -12,9 +12,8 @@ import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.HashMap;
 import java.util.Map;
-import net.fabricmc.fabric.api.tag.convention.v2.ConventionalEntityTypeTags;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,6 +29,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.common.Tags;
 
 /**
  * Decides how much of an entity's tick runs.
@@ -113,7 +113,7 @@ public final class EntityThrottle {
 				}
 			}
 		}
-		forcedChunks = level.getForceLoadedChunks();
+		forcedChunks = level.getForcedChunks();
 	}
 
 	/** Decides the mode for a non-passenger entity that is about to tick. */
@@ -167,7 +167,7 @@ public final class EntityThrottle {
 		if (TickEngineConfig.excludeVehicles && entity.isVehicle()) {
 			return true;
 		}
-		if (TickEngineConfig.excludeBosses && entity.getType().is(ConventionalEntityTypeTags.BOSSES)) {
+		if (TickEngineConfig.excludeBosses && entity.getType().is(Tags.EntityTypes.BOSSES)) {
 			return true;
 		}
 		if (TickEngineConfig.wakeNewEntities && entity.tickCount <= TickEngineConfig.newEntitySeconds * 20) {
@@ -216,10 +216,10 @@ public final class EntityThrottle {
 			key -> new HashMap<>());
 		ThrottleRules.EntityIntervals rule = cache.get(type);
 		if (rule == null) {
-			Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+			ResourceLocation id = ForgeRegistries.ENTITY_TYPES.getKey(type);
 			// Unregistered types cannot be matched by rules: leave them alone.
 			rule = id == null ? new ThrottleRules.EntityIntervals(1, 1) : TickEngineConfig.ENTITY_RULES.resolve(id,
-				preparedLevel.dimension().identifier(), TickEngineConfig.entityDimensionRulesEnabled,
+				preparedLevel.dimension().location(), TickEngineConfig.entityDimensionRulesEnabled,
 				new ThrottleRules.EntityIntervals(AutoTuner.values().entityAiInterval(), AutoTuner.values().entityTickInterval()));
 			cache.put(type, rule);
 		}

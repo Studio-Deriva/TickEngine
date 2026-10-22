@@ -5,7 +5,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraftforge.fml.ModList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -90,8 +90,8 @@ public final class ProfileSnapshot {
 
 	/** Registry namespaces usually match the mod id; fall back to the namespace when they do not. */
 	private static String modName(String namespace) {
-		return FabricLoader.getInstance().getModContainer(namespace)
-			.map(container -> container.getMetadata().getName())
+		return ModList.get().getModContainerById(namespace)
+			.map(container -> container.getModInfo().getDisplayName())
 			.orElse(namespace);
 	}
 }

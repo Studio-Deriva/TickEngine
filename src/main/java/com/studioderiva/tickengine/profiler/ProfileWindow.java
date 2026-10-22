@@ -4,8 +4,8 @@ import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -57,12 +57,12 @@ final class ProfileWindow {
 		blockEntities.forEach((type, stats) ->
 			entries.add(entry(ProfileSnapshot.Category.BLOCK_ENTITY, BlockEntityType.getKey(type), stats)));
 		entities.forEach((type, stats) ->
-			entries.add(entry(ProfileSnapshot.Category.ENTITY, BuiltInRegistries.ENTITY_TYPE.getKey(type), stats)));
+			entries.add(entry(ProfileSnapshot.Category.ENTITY, ForgeRegistries.ENTITY_TYPES.getKey(type), stats)));
 		long durationMillis = System.currentTimeMillis() - startMillis;
 		return new ProfileSnapshot(label, startMillis, durationMillis, sampledTicks, sampledTickNanos, entries);
 	}
 
-	private static ProfileSnapshot.Entry entry(ProfileSnapshot.Category category, Identifier id, TypeStats stats) {
+	private static ProfileSnapshot.Entry entry(ProfileSnapshot.Category category, ResourceLocation id, TypeStats stats) {
 		// Unregistered types (rare, broken mods) still show up instead of crashing the report.
 		String name = id != null ? id.toString() : "unregistered";
 		String namespace = id != null ? id.getNamespace() : "unknown";

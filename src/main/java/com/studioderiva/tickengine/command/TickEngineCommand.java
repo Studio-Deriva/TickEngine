@@ -24,22 +24,22 @@ import java.util.Set;
 import java.util.stream.Stream;
 import java.util.Locale;
 import java.util.function.Predicate;
-import me.lucko.fabric.api.permissions.v0.Permissions;
+import com.studioderiva.tickengine.permission.TickEnginePermissions;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.permissions.PermissionLevel;
+import net.minecraftforge.server.permission.nodes.PermissionNode;
 
 /**
  * {@code /tickengine} command tree.
@@ -115,8 +115,8 @@ public final class TickEngineCommand {
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
 	private static Predicate<CommandSourceStack> permission(String name) {
-		String node = TickEngine.MOD_ID + "." + name;
-		return source -> Permissions.check(source, node, PermissionLevel.byId(TickEngineConfig.commandOpLevel));
+		PermissionNode<Boolean> node = TickEnginePermissions.byName(name);
+		return source -> TickEnginePermissions.check(source, node);
 	}
 
 	// --- status ---
@@ -140,7 +140,7 @@ public final class TickEngineCommand {
 	private static int status(CommandContext<CommandSourceStack> context) {
 		CommandSourceStack source = context.getSource();
 		MinecraftServer server = source.getServer();
-		double mspt = server.getAverageTickTimeNanos() / 1_000_000.0;
+		double mspt = (double) server.getAverageTickTime();
 		double tps = Math.min(20.0, 1000.0 / Math.max(mspt, 0.001));
 		source.sendSuccess(() -> header("TickEngine status"), false);
 		source.sendSuccess(() -> line("MSPT", format(mspt) + " ms", msptColor(mspt))
@@ -305,15 +305,15 @@ public final class TickEngineCommand {
 			int rank = i + 1;
 			MutableComponent name = Component.literal(entry.id()).withStyle(ChatFormatting.WHITE);
 			if (entry.worstPos() != null) {
-				String dimension = entry.worstDimension().identifier().toString();
+				String dimension = entry.worstDimension().location().toString();
 				String coordinates = entry.worstPos().getX() + " " + entry.worstPos().getY() + " " + entry.worstPos().getZ();
 				// Land on top of a block entity instead of inside it, where a player would suffocate.
 				BlockPos start = category == ProfileSnapshot.Category.BLOCK_ENTITY ? entry.worstPos().above() : entry.worstPos();
 				int landingY = landingY(source.getServer().getLevel(entry.worstDimension()), start);
 				String landing = entry.worstPos().getX() + " " + landingY + " " + entry.worstPos().getZ();
 				name = name.withStyle(style -> style
-					.withClickEvent(new ClickEvent.RunCommand("/execute in " + dimension + " run tp @s " + landing))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal(
+					.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/execute in " + dimension + " run tp @s " + landing))
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(
 						"Slowest instance: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one tick\n"
 							+ dimension + " " + coordinates + "\nClick to teleport")))
 					.withUnderlined(true));
@@ -336,7 +336,7 @@ public final class TickEngineCommand {
 			return start.getY();
 		}
 		BlockPos.MutableBlockPos pos = start.mutable();
-		int top = Math.min(level.getMaxY(), start.getY() + 64);
+		int top = Math.min(level.getMaxBuildHeight(), start.getY() + 64);
 		for (int y = start.getY(); y < top; y++) {
 			if (isFree(level, pos.setY(y)) && isFree(level, pos.setY(y + 1))) {
 				return y;
@@ -412,7 +412,7 @@ public final class TickEngineCommand {
 				TickEngine.LOGGER.error("Could not write HTML report", error);
 				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
 			} else {
-				String path = server.getServerDirectory().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
+				String path = server.getServerDirectory().toPath().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
 				source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
 					.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
 			}
@@ -427,8 +427,8 @@ public final class TickEngineCommand {
 		TickEngineConfig.options().forEach((key, option) ->
 			source.sendSuccess(() -> line(key, option.format(), ChatFormatting.WHITE)
 				.withStyle(style -> style
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal(option.comment)))
-					.withClickEvent(new ClickEvent.SuggestCommand("/tickengine config set " + key + " "))), false));
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(option.comment)))
+					.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/tickengine config set " + key + " "))), false));
 		return 1;
 	}
 
@@ -505,13 +505,13 @@ public final class TickEngineCommand {
 				"Default interval", Integer.toString(TickEngineConfig.defaultInterval), TickEngineConfig.dimensionRulesEnabled)))
 			.then(Commands.literal("set")
 				.then(intervalArgument("interval")
-					.then(targetArgument(BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet(), false)
+					.then(targetArgument(ForgeRegistries.BLOCK_ENTITY_TYPES.getKeys(), false)
 						.executes(context -> rulesSet(context, rules, IntegerArgumentType.getInteger(context, "interval"),
 							false, "blockEntities.dimensionRulesEnabled", TickEngineConfig.dimensionRulesEnabled)))))
 			.then(Commands.literal("set-in")
 				.then(Commands.argument("dimension", DimensionArgument.dimension())
 					.then(intervalArgument("interval")
-						.then(targetArgument(BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet(), true)
+						.then(targetArgument(ForgeRegistries.BLOCK_ENTITY_TYPES.getKeys(), true)
 							.executes(context -> rulesSet(context, rules, IntegerArgumentType.getInteger(context, "interval"),
 								true, "blockEntities.dimensionRulesEnabled", TickEngineConfig.dimensionRulesEnabled))))))
 			.then(removeRule(rules, false))
@@ -527,14 +527,14 @@ public final class TickEngineCommand {
 			.then(Commands.literal("set")
 				.then(intervalArgument("ai")
 					.then(intervalArgument("tick")
-						.then(targetArgument(BuiltInRegistries.ENTITY_TYPE.keySet(), false)
+						.then(targetArgument(ForgeRegistries.ENTITY_TYPES.getKeys(), false)
 							.executes(context -> rulesSet(context, rules, entityIntervals(context),
 								false, "entities.dimensionRulesEnabled", TickEngineConfig.entityDimensionRulesEnabled))))))
 			.then(Commands.literal("set-in")
 				.then(Commands.argument("dimension", DimensionArgument.dimension())
 					.then(intervalArgument("ai")
 						.then(intervalArgument("tick")
-							.then(targetArgument(BuiltInRegistries.ENTITY_TYPE.keySet(), true)
+							.then(targetArgument(ForgeRegistries.ENTITY_TYPES.getKeys(), true)
 								.executes(context -> rulesSet(context, rules, entityIntervals(context),
 									true, "entities.dimensionRulesEnabled", TickEngineConfig.entityDimensionRulesEnabled)))))))
 			.then(removeRule(rules, false))
@@ -551,7 +551,7 @@ public final class TickEngineCommand {
 	}
 
 	/** Targets go last as greedy text because ids contain ':', which single-word arguments reject. */
-	private static RequiredArgumentBuilder<CommandSourceStack, String> targetArgument(Set<Identifier> ids, boolean inDimension) {
+	private static RequiredArgumentBuilder<CommandSourceStack, String> targetArgument(Set<ResourceLocation> ids, boolean inDimension) {
 		return Commands.argument("target", StringArgumentType.greedyString())
 			.suggests((context, builder) -> SharedSuggestionProvider.suggest(
 				Stream.concat(inDimension ? Stream.of(ThrottleRules.ALL) : Stream.empty(), targetSuggestions(ids)), builder));
@@ -593,7 +593,7 @@ public final class TickEngineCommand {
 		boolean inDimension, String dimensionOption, boolean dimensionRulesEnabled) throws CommandSyntaxException {
 		CommandSourceStack source = context.getSource();
 		String target = StringArgumentType.getString(context, "target").trim();
-		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().identifier().toString() : null;
+		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().location().toString() : null;
 		String error = rules.set(target, value, dimension);
 		if (error != null) {
 			source.sendFailure(Component.literal(error));
@@ -614,7 +614,7 @@ public final class TickEngineCommand {
 		throws CommandSyntaxException {
 		CommandSourceStack source = context.getSource();
 		String target = StringArgumentType.getString(context, "target").trim();
-		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().identifier().toString() : null;
+		String dimension = inDimension ? DimensionArgument.getDimension(context, "dimension").dimension().location().toString() : null;
 		if (!rules.remove(target, dimension)) {
 			source.sendFailure(Component.literal("No rule for '" + target + "'" + (dimension == null ? "" : " in " + dimension) + "."));
 			return 0;
@@ -626,7 +626,7 @@ public final class TickEngineCommand {
 	}
 
 	/** Every id, plus "namespace:*" for every mod that registers one. */
-	private static Stream<String> targetSuggestions(Set<Identifier> ids) {
+	private static Stream<String> targetSuggestions(Set<ResourceLocation> ids) {
 		return ids.stream()
 			.flatMap(id -> Stream.of(id.toString(), id.getNamespace() + ":" + ThrottleRules.ALL))
 			.distinct();

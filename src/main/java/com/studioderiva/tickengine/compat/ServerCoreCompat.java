@@ -2,7 +2,7 @@ package com.studioderiva.tickengine.compat;
 
 import com.studioderiva.tickengine.TickEngine;
 import java.lang.reflect.Method;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraftforge.fml.ModList;
 
 /**
  * Reads whether ServerCore's entity activation range and dynamic settings are enabled, without a
@@ -16,7 +16,7 @@ import net.fabricmc.loader.api.FabricLoader;
  */
 public final class ServerCoreCompat {
 	private static final int CHECK_INTERVAL_TICKS = 600;
-	private static final boolean INSTALLED = FabricLoader.getInstance().isModLoaded("servercore");
+	private static final boolean INSTALLED = ModList.get().isLoaded("servercore");
 
 	private static Method configGet;
 	private static Method activationRange;

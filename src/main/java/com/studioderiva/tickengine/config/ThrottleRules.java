@@ -6,7 +6,7 @@ import com.studioderiva.tickengine.TickEngine;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * Per-mod and per-type throttle settings, optionally per dimension.
@@ -119,7 +119,7 @@ public final class ThrottleRules<V> {
 		return Collections.unmodifiableMap(dimensionRules);
 	}
 
-	public V resolve(Identifier typeId, Identifier dimension, boolean useDimensionRules, V defaultValue) {
+	public V resolve(ResourceLocation typeId, ResourceLocation dimension, boolean useDimensionRules, V defaultValue) {
 		String typeKey = typeId.toString();
 		String modKey = typeId.getNamespace() + ":" + ALL;
 		Map<String, V> inDimension = useDimensionRules ? dimensionRules.get(dimension.toString()) : null;
@@ -145,7 +145,7 @@ public final class ThrottleRules<V> {
 	/** Adds or replaces a rule. Returns null on success, otherwise an error message. */
 	public String set(String target, V value, String dimension) {
 		String error = validateTarget(target, dimension != null);
-		if (error == null && dimension != null && Identifier.tryParse(dimension) == null) {
+		if (error == null && dimension != null && ResourceLocation.tryParse(dimension) == null) {
 			error = "'" + dimension + "' is not a valid dimension id.";
 		}
 		if (error == null) {
@@ -183,10 +183,10 @@ public final class ThrottleRules<V> {
 		}
 		if (target.endsWith(":" + ALL)) {
 			String namespace = target.substring(0, target.length() - 2);
-			return Identifier.isValidNamespace(namespace) && !namespace.isEmpty() ? null
+			return ResourceLocation.isValidNamespace(namespace) && !namespace.isEmpty() ? null
 				: "'" + namespace + "' is not a valid mod id.";
 		}
-		return target.contains(":") && Identifier.tryParse(target) != null ? null
+		return target.contains(":") && ResourceLocation.tryParse(target) != null ? null
 			: "'" + target + "' is not a valid target. Use a type id like minecraft:hopper or a mod like create:*"
 				+ (inDimension ? " (or * for every type in the dimension)." : ".");
 	}

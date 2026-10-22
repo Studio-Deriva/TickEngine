@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
 
 /** Writes a self-contained HTML report (no external files or scripts) for a profile snapshot. */
 public final class HtmlReport {
@@ -34,7 +34,7 @@ public final class HtmlReport {
 	 */
 	public static CompletableFuture<Path> writeAsync(MinecraftServer server, ProfileSnapshot snapshot) {
 		String html = render(server, snapshot);
-		Path serverDirectory = server.getServerDirectory().toAbsolutePath().normalize();
+		Path serverDirectory = server.getServerDirectory().toPath().toAbsolutePath().normalize();
 		Path directory = serverDirectory.resolve(TickEngineConfig.reportDirectory).normalize();
 		if (!directory.startsWith(serverDirectory)) {
 			// The config already rejects such paths; this guards against anything that slips through.
@@ -102,7 +102,7 @@ public final class HtmlReport {
 		stat(html, "Duration", formatSeconds(snapshot.durationMillis));
 		stat(html, "Sampled ticks", Long.toString(snapshot.sampledTicks));
 		stat(html, "Avg sampled tick", format(snapshot.averageTickMs()) + " ms");
-		stat(html, "Server MSPT now", format(server.getAverageTickTimeNanos() / 1_000_000.0) + " ms");
+		stat(html, "Server MSPT now", format((double) server.getAverageTickTime()) + " ms");
 		long measured = snapshot.entries.stream().mapToLong(ProfileSnapshot.Entry::totalNanos).sum();
 		stat(html, "Explained by types", format(snapshot.percentOfTick(measured)) + " %");
 		stat(html, "Auto-tuning now", TickEngineCommand.tuningSummary(server));
@@ -165,7 +165,7 @@ public final class HtmlReport {
 			bar(html, percent, top);
 			html.append("</td><td class=\"num\">").append(format(entry.worstNanos() / 1_000_000.0)).append(" ms</td><td><code>");
 			if (entry.worstPos() != null) {
-				html.append(escape(entry.worstDimension().identifier().toString())).append(' ')
+				html.append(escape(entry.worstDimension().location().toString())).append(' ')
 					.append(entry.worstPos().getX()).append(' ').append(entry.worstPos().getY()).append(' ')
 					.append(entry.worstPos().getZ());
 			}
