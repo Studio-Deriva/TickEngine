@@ -26,3 +26,6 @@ run-client/
 
 # Publication assets and private notes (not part of the mod)
 docs/
+
+# Test runs
+logs/
