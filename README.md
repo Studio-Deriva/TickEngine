@@ -6,7 +6,7 @@
 > world. The maintained version is TickEngine for Fabric 1.21.11, on the `main` branch.
 >
 > Differences in this port: Forge 47.x instead of Fabric; permission nodes go through Forge's
-> PermissionAPI (LuckPerms for Forge should be able to grant them; not tested); the boss tag is `forge:bosses` instead of
+> PermissionAPI (tested with LuckPerms for Forge); the boss tag is `forge:bosses` instead of
 > `c:bosses`. Tests: `./gradlew test` and `./gradlew runGameTestServer`. How the port was tested and
 > what it saves on a modded Forge server: [Forge 1.20.1 port: tests and benchmark](#forge-1201-port-tests-and-benchmark).
 
@@ -67,7 +67,7 @@ see [Compatibility](#compatibility)).
 | Loader | Forge 47 or newer (tested on 47.4.0) |
 | Java | 17 or newer |
 | Required | nothing else (MixinExtras is bundled in the jar) |
-| Optional | a permissions mod that uses Forge's PermissionAPI, such as LuckPerms (not tested) |
+| Optional | a permissions mod that uses Forge's PermissionAPI, such as LuckPerms (tested with 5.4.102) |
 
 Install it on the **server only**. Players don't need it, and it does nothing on a client.
 
@@ -115,7 +115,8 @@ Players are never throttled. Around the nearest player:
 | beyond | the full tick once every `tick` ticks (default 4); in between only timers advance (item and XP despawn, mob idle time, portal cooldown, burning time) |
 
 - Throttled ticks follow each entity's own tick counter, so logic like "every 40 ticks" (item merging)
-  keeps working with intervals 2, 4, 5, 10 or 20, and the work is spread over different ticks.
+  keeps working with intervals 2, 4, 5, 10 or 20. Entities loaded at different times run their turns
+  on different ticks; entities loaded together share a counter and so a turn (see Tick spreading).
 - When a throttled mob gets its AI turn, it always runs a full goal selection, so far mobs still start
   and stop behaviours (eating grass, picking targets, fleeing).
 - Never throttled by default: projectiles, entities carrying passengers, bosses (`forge:bosses` tag), mobs in
@@ -126,6 +127,23 @@ Players are never throttled. Around the nearest player:
   the first `newEntitySeconds` after spawning or loading, animals in love and babies.
 - Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
 - Entities only tick within the server's simulation distance, so keep `aiRadiusChunks` below it.
+
+### Tick spreading (experimental, off by default)
+
+Entities loaded together (after a restart, in spawn chunks, in force-loaded chunks) start with the
+same tick counter, so all their throttled turns land on the same tick: the average MSPT drops, but
+every few ticks one tick is heavier than a normal tick would be. Measured on a test server right
+after a restart, with 1100 mobs: average 9.2 ms, but 5% of ticks over 35 ms and the slowest at 55 ms.
+
+`/tickengine spread enable` explains what it does and asks you to confirm with
+`/tickengine spread confirm I understand the risks`. When on, each entity's counter is moved forward
+once, by 0–19 ticks, 5 seconds after it is loaded (and right away for entities already loaded), so
+the turns spread out. Same test with it on: average 9.3 ms, 5% of ticks over 10.8 ms, slowest 21 ms.
+
+The risk: logic that waits for one exact counter value in that short range can be skipped once per
+load, and counter-based timers such as "hurt recently" can end up to 19 ticks early once. Vanilla does
+not wait for exact values there; some mods might. `/tickengine spread disable` turns it off;
+`/tickengine config set` cannot change it.
 
 ## How auto-tuning works
 
@@ -192,22 +210,24 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine tuning status` | Auto-tuning level and the values in use right now |
 | `/tickengine tuning pause` / `resume` | Stop or restart automatic level changes |
 | `/tickengine tuning level <n>` | Force a level (pauses automatic changes until `resume`) |
+| `/tickengine spread` | Tick spreading: state, what it does, gain and risk |
+| `/tickengine spread enable` / `confirm <phrase>` / `disable` | Turn tick spreading on (after reading the warning and typing the phrase) or off |
 
 ## Permissions
 
 Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
-With a permissions mod that uses Forge's PermissionAPI (LuckPerms for Forge, for example; not tested
-with this port) use these nodes:
+With a permissions mod that uses Forge's PermissionAPI (tested with LuckPerms for Forge 5.4.102,
+which registers itself as the permission handler) use these nodes:
 `tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
 `tickengine.notify` for admin notices (auto-tuning changes, the ServerCore notices below).
 
 ## Compatibility
 
-- **Other performance mods** (FerriteCore, ModernFix, Canary and the like): **not tested** with the
-  Forge port. The Fabric version runs alongside Lithium and FerriteCore without conflicts.
-- **ServerCore** (**not verified on Forge**: TickEngine reads ServerCore's config with class names
-  from its Fabric 1.21.11 version; if they differ in the Forge build you use, TickEngine assumes the
-  activation range is on and pauses its entity throttling, with an admin notice):
+- **Other performance mods**: runs alongside ModernFix, FerriteCore and Sinytra Connector (in the
+  252-mod pack below) without mixin conflicts. Canary, Radium and others have not been tested.
+- **ServerCore** (verified with ServerCore for Forge 1.5.2+1.20.1; if a future version renames its
+  config classes, TickEngine assumes the activation range is on and pauses its entity throttling,
+  with an admin notice):
   - *Entity activation range:* if it is enabled, TickEngine pauses its own entity throttling (profiler
     and block entity throttling keep running), so entities are not throttled twice.
   - *Dynamic settings:* if they are enabled, ServerCore manages simulation and view distance and
@@ -243,16 +263,28 @@ been verified yet.
 
 The audit above was done on the Fabric version. The Forge port was checked separately:
 
-- **Automated tests.** 8 JUnit tests (throttle rules) and 30 GameTests run inside a real Forge server
+- **Automated tests.** 8 JUnit tests (throttle rules) and 36 GameTests run inside a real Forge server
   (`./gradlew runGameTestServer`). They measure throttling on real furnaces, items and mobs, and also
-  cover exemptions, zones, rules, the goal-selection fix, the profiler and HTML reports, commands,
-  permissions, auto-tuning under load and config file handling. To check that the tests can fail,
+  cover exemptions, zones, several players at once, rules, the goal-selection fix, the profiler and
+  HTML reports, commands, permissions, auto-tuning under load, config file handling and tick spreading
+  with its confirmation. To check that the tests can fail,
   three throttling mechanisms were broken on purpose; 10 tests failed, at least one per break.
 - **Production jar on a real server.** Forge 1.20.1-47.4.0 server from the official installer: mixins
   applied, MixinExtras loaded from the bundled jar, throttling rates as expected, clean shutdown.
 - **Modpack with a real client.** A 16-mod Forge 1.20.1 pack (Iron's Spells 'n Spellbooks, Spartan
   Weaponry and Shields, JCraft, Curios, GeckoLib, Watut and libraries) with a player connected: zones
   follow the player, `/tickengine top` teleport, combat and mod content behaved normally.
+- **On a client.** With TickEngine installed in a client's mods folder, the client joins servers and
+  opens singleplayer worlds without errors; the mod does nothing there.
+- **LuckPerms for Forge 5.4.102 and ServerCore for Forge 1.5.2.** Nodes granted and denied, the fall
+  back to the operator level, notices only for `tickengine.notify`; ServerCore's activation range and
+  dynamic settings read correctly, with entity throttling paused and the admin notices shown.
+- **Forge 47.2.0**, the Nether and the End. Throttling and per-dimension rules behave as in the
+  overworld.
+- **Modded machines and vehicles** in the 252-mod pack below: Immersive Engineering capacitors, pumps
+  and batchers tick at 1/4 without errors; Superb Warfare vehicles are unaffected while parked. Airdrop
+  planes (dyairdrop) fly at a quarter of their speed far from players, so drops arrive later; to keep
+  them at full speed: `/tickengine rules entities set 1 1 dyairdrop:*`.
 - **A heavy modpack.** ZOMBIEMANIA V2.2 C2: 252 server-side mods on Forge 1.20.1-47.4.8, including
   Create, Alex's Mobs, Mutant Monsters, Immersive Engineering, Superb Warfare, Ad Astra, Sinytra
   Connector, ModernFix and FerriteCore. TickEngine loaded with no mixin conflicts and logged no errors.
@@ -319,8 +351,34 @@ What these numbers do and do not show:
   to. On a server whose load is outside the spawn chunks, that auto-tuning step can save more.
 - TickEngine only saves time far from players. With the player inside the load, almost nothing was
   throttled, and that is by design.
-- The cost of TickEngine itself was not measured on its own: that needs a run without the mod
-  installed.
+
+**What TickEngine itself costs.** Same load (1024 hoppers passing items, 280 furnaces, 512 cows and
+512 villagers in force-loaded chunks), Forge 47.2.0, mean tick time from `/forge tps` over 60 s:
+
+| Setup | ms per tick |
+|---|---|
+| TickEngine not installed | 24.3 |
+| Installed, throttling and profiler off | 24.3 |
+| Installed, only the light profiler on | 24.2 |
+| Installed, throttling on (force-loaded chunks: interval 2) | 13.8 (−43%) |
+| Same, the JVM limited to 2 cores and 3 GB like an old PC | 13.7–13.9, against 23.7–24.2 off (−43%) |
+
+Installed but idle, TickEngine costs nothing measurable (the runs differ by about ±0.5 ms). The 2-core
+run limits threads and memory, not the speed of each core, so an old PC would show higher numbers.
+
+**Tick spikes and tick spreading.** Same server, measured tick by tick right after a restart, with
+the furnaces and mobs throttled at interval 4:
+
+| Setup | mean | median | slowest 5% | slowest 1% | slowest tick |
+|---|---|---|---|---|---|
+| Throttling off | 25.0 | 24.8 | 27.3 | 29.6 | 33.4 ms |
+| Throttling on | 9.2 | 1.0 | 35.0 | 38.1 | 54.8 ms |
+| Throttling on + tick spreading | 9.3 | 9.2 | 10.8 | 12.2 | 21.1 ms |
+
+Without spreading, mobs loaded together run their throttled turn on the same tick: three light ticks,
+then one heavier than a normal tick. Block entity `stagger` barely changes this; the entities cause it.
+Tick spreading removes the spikes but is off by default, because it moves entity tick counters (see
+Tick spreading above).
 
 ## Contributing
 

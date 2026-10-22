@@ -102,6 +102,16 @@ public final class BlockEntityThrottleTests {
 		});
 	}
 
+	/** A far player does not hide a near one: the furnace near the second player runs fully. */
+	@GameTest(template = "floor", batch = "be_two_players", timeoutTicks = 200)
+	public static void furnaceNearAnyPlayerIsNotThrottled(GameTestHelper helper) {
+		configure(helper, "blockEntities.defaultInterval", "10", "blockEntities.activeRadiusChunks", "1");
+		BlockPos absolute = helper.absolutePos(FURNACE);
+		TestSupport.playerAt(helper, absolute.getX() + 400, absolute.getZ());
+		TestSupport.playerAt(helper, absolute.getX(), absolute.getZ() - 16);
+		measure(helper, WINDOW - 1, WINDOW + 1, "burn ticks with one far and one near player");
+	}
+
 	@GameTest(template = "floor", batch = "be_player", timeoutTicks = 200)
 	public static void furnaceNearPlayerIsNotThrottled(GameTestHelper helper) {
 		configure(helper, "blockEntities.defaultInterval", "10", "blockEntities.activeRadiusChunks", "1");

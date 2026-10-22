@@ -174,6 +174,25 @@ public final class EntityThrottleTests {
 		helper.succeed();
 	}
 
+	/** With several players, each entity is judged by its nearest player. */
+	@GameTest(template = "floor", batch = "entity_two_players", timeoutTicks = 40)
+	public static void nearestOfSeveralPlayersDecides(GameTestHelper helper) {
+		configure(helper, "entities.fullRadiusChunks", "1", "entities.aiRadiusChunks", "3",
+			"entities.defaultAiInterval", "4", "entities.defaultTickInterval", "4");
+		BlockPos cowPos = helper.absolutePos(new BlockPos(8, 2, 8));
+		TestSupport.playerAt(helper, cowPos.getX() + 320, cowPos.getZ());
+		check(decide(idleCow(helper, 5)) == Mode.MINIMAL, "one far player: the cow is in the far zone");
+		TestSupport.playerAt(helper, cowPos.getX() - 32, cowPos.getZ());
+		check(decide(idleCow(helper, 5)) == Mode.AI_SKIPPED, "a second player 2 chunks away puts it in the AI zone");
+		TestSupport.playerAt(helper, cowPos.getX(), cowPos.getZ() + 16);
+		check(decide(idleCow(helper, 5)) == Mode.FULL, "a third player 1 chunk away puts it in the full zone");
+		Cow between = create(helper, EntityType.COW, 8.5 + 160, 2, 8.5);
+		between.setOnGround(true);
+		between.tickCount = 5;
+		check(decide(between) == Mode.MINIMAL, "a cow far from all three players is still throttled");
+		helper.succeed();
+	}
+
 	// --- effect on real entities ---
 
 	@GameTest(template = "floor", batch = "entity_item_age", timeoutTicks = 200)

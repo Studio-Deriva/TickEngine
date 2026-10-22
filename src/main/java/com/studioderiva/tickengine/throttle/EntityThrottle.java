@@ -15,6 +15,7 @@ import java.util.Map;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.AgeableMob;
@@ -52,6 +53,10 @@ public final class EntityThrottle {
 	public enum Mode { FULL, THROTTLED_FULL, AI_SKIPPED, MINIMAL }
 
 	private static final byte FAR = Byte.MAX_VALUE;
+	/** With entities.spreadTicks, an entity's tick counter is moved once when it reaches this value (5 s). */
+	public static final int SPREAD_AT_TICK = 100;
+	/** Counters are moved by 0 to SPREAD_RANGE - 1, which spreads every interval that divides 20. */
+	public static final int SPREAD_RANGE = 20;
 	/** Chebyshev chunk distance to the nearest player, for chunks up to aiRadiusChunks. */
 	private static final Long2ByteOpenHashMap playerDistance = new Long2ByteOpenHashMap();
 	private static ServerLevel preparedLevel;
@@ -120,6 +125,9 @@ public final class EntityThrottle {
 	public static Mode decide(Entity entity) {
 		if (!(entity.level() instanceof ServerLevel level) || entity instanceof Player) {
 			return Mode.FULL;
+		}
+		if (TickEngineConfig.spreadEntityTicks && entity.tickCount == SPREAD_AT_TICK) {
+			spread(entity);
 		}
 		if (level != preparedLevel || level.getGameTime() != preparedGameTime) {
 			prepare(level);
@@ -297,6 +305,37 @@ public final class EntityThrottle {
 
 	public static long aiSkippedLastSecond() {
 		return aiSkippedLastSecond;
+	}
+
+	/**
+	 * Moves the tick counter forward by a fixed amount per entity. Vanilla starts the counter at 0
+	 * whenever an entity is loaded, so its value only matters modulo the periods logic checks;
+	 * this is the same as having been loaded a few ticks earlier. The amount comes from the
+	 * entity id, so entities loaded together end up on different throttled turns.
+	 */
+	private static void spread(Entity entity) {
+		entity.tickCount += spreadOffset(entity);
+	}
+
+	public static int spreadOffset(Entity entity) {
+		return Math.floorMod(entity.getId() * 0x9E3779B9, SPREAD_RANGE);
+	}
+
+	/**
+	 * Applies the counter move to entities already past {@link #SPREAD_AT_TICK} when spreading is
+	 * turned on, so they do not wait for their next load. Returns how many were moved.
+	 */
+	public static int spreadLoadedEntities(MinecraftServer server) {
+		int moved = 0;
+		for (ServerLevel level : server.getAllLevels()) {
+			for (Entity entity : level.getAllEntities()) {
+				if (!(entity instanceof Player) && entity.tickCount > SPREAD_AT_TICK) {
+					spread(entity);
+					moved++;
+				}
+			}
+		}
+		return moved;
 	}
 
 	public static long minimalLastSecond() {

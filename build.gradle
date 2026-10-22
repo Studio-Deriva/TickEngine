@@ -45,6 +45,17 @@ minecraft {
 		// Only for testing against the dev server: TickEngine itself does nothing on the client.
 		client {
 			workingDirectory project.file('run-client')
+			// ./gradlew runClient -PquickPlay=localhost:25565 joins a server directly;
+			// -PquickPlaySingleplayer=<world folder> opens a world from run-client/saves.
+			if (project.hasProperty('quickPlay')) {
+				args '--quickPlayMultiplayer', project.property('quickPlay')
+			}
+			if (project.hasProperty('quickPlaySingleplayer')) {
+				args '--quickPlaySingleplayer', project.property('quickPlaySingleplayer')
+			}
+			if (project.hasProperty('username')) {
+				args '--username', project.property('username')
+			}
 		}
 		// In-game tests (src/gametest, not shipped): ./gradlew runGameTestServer
 		gameTestServer {

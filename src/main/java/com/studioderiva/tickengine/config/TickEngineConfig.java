@@ -74,6 +74,7 @@ public final class TickEngineConfig {
 	public static boolean wakeNewEntities = true;
 	public static int newEntitySeconds = 10;
 	public static boolean wakeBreeding = true;
+	public static boolean spreadEntityTicks = false;
 	public static final ThrottleRules<ThrottleRules.EntityIntervals> ENTITY_RULES = new ThrottleRules<>(ThrottleRules.ENTITY_INTERVALS,
 		new String[] {
 			"Intervals per type or per mod: \"minecraft:villager\": { \"ai\": 2, \"tick\": 8 }.",
@@ -225,6 +226,16 @@ public final class TickEngineConfig {
 			"Tick normally while an animal is in love or is a baby, so far animal farms breed and grow\n"
 				+ "at normal speed.",
 			() -> wakeBreeding, v -> wakeBreeding = v));
+		register(Option.bool("entities.spreadTicks",
+			"EXPERIMENTAL, off by default. Turn it on with '/tickengine spread enable', which explains it\n"
+				+ "and asks for confirmation; '/tickengine config set' cannot change it.\n"
+				+ "Throttled entities run their full tick when their tick counter is a multiple of the\n"
+				+ "interval. Entities loaded together (after a restart, in spawn or force-loaded chunks) share\n"
+				+ "that counter, so they all run on the same tick: one heavy tick, then light ones. When on,\n"
+				+ "each entity's counter is moved forward once, by 0-19 ticks, 5 seconds after it is loaded,\n"
+				+ "which spreads the work evenly. Risk: logic that waits for one exact counter value in that\n"
+				+ "short range can be skipped once per load (vanilla does not do this; some mods might).",
+			() -> spreadEntityTicks, v -> spreadEntityTicks = v).confirmedBy("/tickengine spread enable"));
 
 		register(Option.bool("autoTuning.enabled",
 			"Adjusts throttling to the server load. Every 'decisionSeconds' it looks at the average MSPT:\n"
@@ -467,6 +478,8 @@ public final class TickEngineConfig {
 		private final Function<String, T> parser;
 		/** Returns an error message for an out-of-range value, or null when it is valid. */
 		private final Function<T, String> validator;
+		/** For options with risks: the command that changes it after a confirmation, or null. */
+		private String confirmCommand;
 
 		private Option(String key, String comment, Supplier<T> getter, Consumer<T> setter,
 			Function<String, T> parser, Function<T, String> validator) {
@@ -501,6 +514,16 @@ public final class TickEngineConfig {
 			Function<String, String> validator) {
 			return new Option<>(key, comment, getter, setter, text -> text,
 				value -> value.isBlank() ? "must not be empty." : validator.apply(value));
+		}
+
+		Option<T> confirmedBy(String command) {
+			confirmCommand = command;
+			return this;
+		}
+
+		/** The command to use instead of '/tickengine config set', or null when config set may change it. */
+		public String confirmCommand() {
+			return confirmCommand;
 		}
 
 		public String format() {
