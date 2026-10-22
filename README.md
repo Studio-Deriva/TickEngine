@@ -6,7 +6,7 @@
 > world. The maintained version is TickEngine for Fabric 1.21.11, on the `main` branch.
 >
 > Differences in this port: Forge 47.x instead of Fabric; permission nodes go through Forge's
-> PermissionAPI (LuckPerms for Forge can grant them); the boss tag is `forge:bosses` instead of
+> PermissionAPI (LuckPerms for Forge should be able to grant them; not tested); the boss tag is `forge:bosses` instead of
 > `c:bosses`. Tests: `./gradlew test` and `./gradlew runGameTestServer`. How the port was tested and
 > what it saves on a modded Forge server: [Forge 1.20.1 port: tests and benchmark](#forge-1201-port-tests-and-benchmark).
 
@@ -19,15 +19,17 @@ Server-side tick profiler and throttling for Fabric 1.21.11 (this branch: Forge 
 TickEngine shows where your server's tick time goes — per mod, per block entity type, per entity
 type — and makes the things far from every player cost less: machines, hoppers and furnaces tick less
 often, far mobs think less often. When the server struggles, auto-tuning tightens the throttles step by
-step, and relaxes them again when the load is gone. It runs **alongside** Lithium, FerriteCore and
-ServerCore, not instead of them.
+step, and relaxes them again when the load is gone. It is meant to run **alongside** other performance
+mods, not instead of them (on Forge, combinations with other performance mods have not been tested;
+see [Compatibility](#compatibility)).
 
 **Free and open source**, like everything we make: MIT, source included, no premium version.
 
-> **Beta.** TickEngine changes how the game runs far from players. It has been tested on a dev server,
-> on a real Fabric server with a mod set and with a real modpack (see
-> [How this mod was checked](#how-this-mod-was-checked)), but not yet on many live servers. Keep a
-> backup of your world and tell us what you see.
+> **Beta.** TickEngine changes how the game runs far from players. The Fabric version has been tested
+> on a dev server, on a real Fabric server with a mod set and with a real modpack; this Forge port on a
+> Forge GameTest server, a real Forge server and a Forge modpack with a player (see
+> [How this mod was checked](#how-this-mod-was-checked)). Neither has run on many live servers yet.
+> Keep a backup of your world.
 
 ---
 
@@ -61,17 +63,17 @@ ServerCore, not instead of them.
 
 | | |
 |---|---|
-| Minecraft | 1.21.11 |
-| Loader | Fabric 0.19.5+ |
-| Java | 21 |
-| Required | Fabric API |
-| Optional | LuckPerms (or any fabric-permissions-api provider) for permission nodes |
+| Minecraft | 1.20.1 |
+| Loader | Forge 47 or newer (tested on 47.4.0) |
+| Java | 17 or newer |
+| Required | nothing else (MixinExtras is bundled in the jar) |
+| Optional | a permissions mod that uses Forge's PermissionAPI, such as LuckPerms (not tested) |
 
 Install it on the **server only**. Players don't need it, and it does nothing on a client.
 
 ## Getting started
 
-1. Drop the jar in the server's `mods/` folder, next to Fabric API, and start the server. The config is
+1. Drop the jar in the server's `mods/` folder and start the server. The config is
    created at `config/tickengine.json5`.
 2. Play for a minute, then run `/tickengine top` to see what costs the most.
 3. Throttling and auto-tuning are on by default. `/tickengine status` shows what they are doing right
@@ -116,7 +118,7 @@ Players are never throttled. Around the nearest player:
   keeps working with intervals 2, 4, 5, 10 or 20, and the work is spread over different ticks.
 - When a throttled mob gets its AI turn, it always runs a full goal selection, so far mobs still start
   and stop behaviours (eating grass, picking targets, fleeing).
-- Never throttled by default: projectiles, entities carrying passengers, bosses (`c:bosses` tag), mobs in
+- Never throttled by default: projectiles, entities carrying passengers, bosses (`forge:bosses` tag), mobs in
   combat (hit by a player or mob in the last `combatSeconds`, or with an attack target).
 - Default rules: Elder Guardians and Wardens are never throttled, because their area effects (mining
   fatigue, darkness) only fire on specific ticks that a throttled AI turn would miss.
@@ -194,34 +196,40 @@ overwritten: the settings in use are kept and the command tells you.
 ## Permissions
 
 Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
-With LuckPerms (or any fabric-permissions-api provider) use these nodes:
+With a permissions mod that uses Forge's PermissionAPI (LuckPerms for Forge, for example; not tested
+with this port) use these nodes:
 `tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
 `tickengine.notify` for admin notices (auto-tuning changes, the ServerCore notices below).
 
 ## Compatibility
 
-- **Lithium, FerriteCore**: tested together, no conflicts. Hoppers and furnaces that Lithium puts to
-  sleep don't tick at all, and TickEngine throttles the rest.
-- **ServerCore**:
+- **Other performance mods** (FerriteCore, ModernFix, Canary and the like): **not tested** with the
+  Forge port. The Fabric version runs alongside Lithium and FerriteCore without conflicts.
+- **ServerCore** (**not verified on Forge**: TickEngine reads ServerCore's config with class names
+  from its Fabric 1.21.11 version; if they differ in the Forge build you use, TickEngine assumes the
+  activation range is on and pauses its entity throttling, with an admin notice):
   - *Entity activation range:* if it is enabled, TickEngine pauses its own entity throttling (profiler
     and block entity throttling keep running), so entities are not throttled twice.
   - *Dynamic settings:* if they are enabled, ServerCore manages simulation and view distance and
     TickEngine's auto-tuning only adjusts its own throttles.
 
   Admins get a notice on join and every `notices.intervalMinutes` (30) while either applies.
-- **C2ME**: **not verified.** Every C2ME build for 1.21.11 needs Java 25, and we have not run it.
-  TickEngine is built for Java 21 and should load on Java 25 as well; tell us how it goes.
+- **Tested modpack**: Iron's Spells 'n Spellbooks, Spartan Weaponry and Shields, JCraft, Curios,
+  GeckoLib, Watut and their libraries, with a player connected. See the benchmark below.
 - **Modded block entities and entities** are throttled like vanilla ones. If a mod's machine or mob
   misbehaves when far away, give it a rule with interval 1 and tell us which one it is.
 
 ## Building from source
 
 ```
-./gradlew build          # jar in build/libs/
-./gradlew runServer      # dev server in run/
+./gradlew build              # jar in build/libs/ (also runs the unit tests)
+./gradlew test               # unit tests only
+./gradlew runGameTestServer  # in-game tests on a Forge GameTest server
+./gradlew runServer          # dev server in run/
 ```
 
-Java 21 or newer, and a first run with network access to fetch the dependencies.
+Run Gradle with Java 17 to 21; the mod is compiled for Java 17, and Gradle downloads a JDK 17 for it
+when none is installed. The first run needs network access to fetch Forge and the dependencies.
 
 ## How this mod was checked
 

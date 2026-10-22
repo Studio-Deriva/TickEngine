@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0-beta.1+1.20.1-forge — Forge 1.20.1 port (personal project)
+
+Made for personal use; support and updates are not guaranteed.
+
+- Port of 1.0.0-beta.1 (below) to Minecraft 1.20.1 and Forge 47 or newer, Java 17. Same features.
+- Differences from the Fabric version: permission nodes go through Forge's PermissionAPI instead of
+  fabric-permissions-api; bosses are read from the `forge:bosses` tag instead of `c:bosses`; MixinExtras
+  is bundled in the jar; clients without TickEngine can join.
+- Includes the fix from the Fabric version's next release: lowering `autoTuning.relaxAfterSeconds` while
+  the server runs applies at the next decision instead of up to 10 minutes later.
+- Tests: JUnit (`./gradlew test`) and in-game GameTests (`./gradlew runGameTestServer`).
+- Not verified on Forge: ServerCore, LuckPerms, other performance mods.
+
 ## 1.0.0-beta.1 — first public beta
 
 - Tick profiler: an always-on light mode (one tick sampled per second) and detailed sessions, ranked by
