@@ -96,6 +96,8 @@ public final class TickEngineConfig {
 	public static int decisionSeconds = 10;
 	public static int relaxAfterSeconds = 60;
 	public static boolean tuneIntervals = true;
+	public static boolean tuneForcedChunks = true;
+	public static int maxForcedChunkInterval = 4;
 	public static boolean tuneRadii = true;
 	public static boolean tuneSimulationDistance = true;
 	public static boolean tuneViewDistance = true;
@@ -165,7 +167,8 @@ public final class TickEngineConfig {
 		register(Option.integer("blockEntities.forcedChunkMaxInterval",
 			"Force-loaded chunks without players (/forceload, chunk loaders that use it) never tick slower\n"
 				+ "than once every N ticks. 1 = never throttle them. Note: mod chunk loaders that use their\n"
-				+ "own loading tickets are treated like any other far chunk. Range: 1-100.",
+				+ "own loading tickets are treated like any other far chunk. Auto-tuning may raise it under\n"
+				+ "load, see autoTuning.tuneForcedChunks. Range: 1-100.",
 			1, 100, () -> forcedChunkMaxInterval, v -> forcedChunkMaxInterval = v));
 		register(Option.bool("blockEntities.dimensionRulesEnabled",
 			"Use 'dimensionRules' below. When false, only 'rules' and 'defaultInterval' apply.",
@@ -195,7 +198,8 @@ public final class TickEngineConfig {
 			1, 100, () -> defaultTickInterval, v -> defaultTickInterval = v));
 		register(Option.integer("entities.forcedChunkMaxInterval",
 			"In force-loaded chunks without players, AI and ticks are never slower than once every N\n"
-				+ "ticks. 1 = never throttle them. Range: 1-100.",
+				+ "ticks. 1 = never throttle them. Auto-tuning may raise it under load, see\n"
+				+ "autoTuning.tuneForcedChunks. Range: 1-100.",
 			1, 100, () -> entityForcedChunkMaxInterval, v -> entityForcedChunkMaxInterval = v));
 		register(Option.bool("entities.dimensionRulesEnabled",
 			"Use 'dimensionRules' below. When false, only 'rules' and the defaults apply.",
@@ -233,8 +237,8 @@ public final class TickEngineConfig {
 			() -> wakeBreeding, v -> wakeBreeding = v));
 		register(Option.bool("entities.spreadTicks",
 			"EXPERIMENTAL, on by default since 1.0.0-beta.3. Turn it off with '/tickengine spread disable'\n"
-				+ "or false here; turning it back on goes through '/tickengine spread enable', which explains it\n"
-				+ "and asks for confirmation. '/tickengine config set' cannot change it.\n"
+				+ "or false here. In game, turning it back on goes through '/tickengine spread enable', which\n"
+				+ "explains it and asks for confirmation; '/tickengine config set' can only turn it off.\n"
 				+ "Throttled entities run their full tick when their tick counter is a multiple of the\n"
 				+ "interval. Entities loaded together (after a restart, in spawn or force-loaded chunks) share\n"
 				+ "that counter, so they all run on the same tick: one heavy tick, then light ones. When on,\n"
@@ -269,15 +273,24 @@ public final class TickEngineConfig {
 			"Step 1: raise the default throttle intervals (block entities and entities) through safe values\n"
 				+ "only: 2, 4, 5, 10, 20. Explicit rules are never changed.",
 			() -> tuneIntervals, v -> tuneIntervals = v));
+		register(Option.bool("autoTuning.tuneForcedChunks",
+			"Step 2: raise the forcedChunkMaxInterval limits (block entities and entities) through safe\n"
+				+ "values, up to maxForcedChunkInterval: farms kept loaded with nobody nearby run slower while\n"
+				+ "the server struggles. A limit of 1 (never throttle them) is never raised.",
+			() -> tuneForcedChunks, v -> tuneForcedChunks = v));
+		register(Option.integer("autoTuning.maxForcedChunkInterval",
+			"Highest forcedChunkMaxInterval auto-tuning may reach. 4 = force-loaded chunks without players\n"
+				+ "run at a quarter of the speed at most. Range: 1-100.",
+			1, 100, () -> maxForcedChunkInterval, v -> maxForcedChunkInterval = v));
 		register(Option.bool("autoTuning.tuneRadii",
-			"Step 2: shrink the throttle radii around players by one chunk per level.",
+			"Step 3: shrink the throttle radii around players by one chunk per level.",
 			() -> tuneRadii, v -> tuneRadii = v));
 		register(Option.bool("autoTuning.tuneSimulationDistance",
-			"Step 3: lower the simulation distance by one per level. Skipped while ServerCore's dynamic\n"
+			"Step 4: lower the simulation distance by one per level. Skipped while ServerCore's dynamic\n"
 				+ "settings are on (ServerCore manages the distances then).",
 			() -> tuneSimulationDistance, v -> tuneSimulationDistance = v));
 		register(Option.bool("autoTuning.tuneViewDistance",
-			"Step 4: lower the view distance by one per level. Helps RAM and network more than CPU.\n"
+			"Step 5: lower the view distance by one per level. Helps RAM and network more than CPU.\n"
 				+ "Skipped while ServerCore's dynamic settings are on.",
 			() -> tuneViewDistance, v -> tuneViewDistance = v));
 		register(Option.integer("autoTuning.maxInterval",

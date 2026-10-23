@@ -233,6 +233,8 @@ public final class TickEngineCommand {
 		source.sendSuccess(() -> line("Entities", "AI every " + values.entityAiInterval() + ", far tick every "
 			+ values.entityTickInterval() + ", full radius " + values.entityFullRadius() + ", AI radius "
 			+ values.entityAiRadius() + " chunks", ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Force-loaded chunks", "never slower than every " + values.blockEntityForcedMax()
+			+ " ticks for block entities, " + values.entityForcedMax() + " for entities", ChatFormatting.WHITE), false);
 		source.sendSuccess(() -> line("Distances", "simulation " + server.getPlayerList().getSimulationDistance()
 			+ ", view " + server.getPlayerList().getViewDistance()
 			+ (ServerCoreCompat.dynamicSettingsEnabled() ? " (managed by ServerCore)" : ""), ChatFormatting.WHITE), false);
@@ -613,15 +615,17 @@ public final class TickEngineCommand {
 		if (option == null) {
 			return 0;
 		}
-		if (option.confirmCommand() != null) {
-			source.sendFailure(Component.literal(option.key + " has risks and can only be changed with '"
-				+ option.confirmCommand() + "', which explains them and asks for confirmation."));
-			return 0;
-		}
 		String previous = option.format();
 		String error = option.set(StringArgumentType.getString(context, "value"));
 		if (error != null) {
 			source.sendFailure(Component.literal(option.key + ": " + error));
+			return 0;
+		}
+		// Options with risks can be turned off here, but only turned on after their confirmation.
+		if (option.confirmCommand() != null && !option.format().equals("false")) {
+			option.set(previous);
+			source.sendFailure(Component.literal(option.key + " has risks and can only be turned on with '"
+				+ option.confirmCommand() + "', which explains them and asks for confirmation."));
 			return 0;
 		}
 		String inconsistency = TickEngineConfig.checkConsistency();

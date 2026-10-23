@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: turning tick spreading on skipped the entities that were exactly at the spreading tick at that
+  moment; they are moved too now.
+- `/tickengine config set entities.spreadTicks false` now turns spreading off. Turning it on still goes
+  through `/tickengine spread enable` and its confirmation.
+- Auto-tuning has a new step, right after the intervals: it raises the limit for force-loaded chunks
+  without players (`forcedChunkMaxInterval`, block entities and entities) from 2 to 4 while the server is
+  above 45 ms per tick, and puts it back when the load is gone. Before, those areas never went below one
+  tick in two however heavy the load. `autoTuning.tuneForcedChunks` turns the step off,
+  `autoTuning.maxForcedChunkInterval` (4) sets how far it goes; a limit of 1 is never raised. The default
+  limit stays 2. One more auto-tuning level is available as a result.
+- A mini-audit of every change since 1.0.0-beta.1 is in HOW_WE_VERIFIED_AND_FIXED_THE_BUGS.txt (part 6).
+
 ## 1.0.0-beta.4
 
 - Tick spreading no longer moves entity types that are never throttled: a rule with `ai` 1 and `tick` 1

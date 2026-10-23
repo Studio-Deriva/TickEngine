@@ -77,4 +77,81 @@ class AutoTunerTest {
 		decision(0);
 		assertEquals(0, AutoTuner.level(), "relaxes after the doubled 4 s");
 	}
+
+	private static final String[] FORCED_KEYS = {"autoTuning.tuneIntervals", "autoTuning.tuneForcedChunks",
+		"autoTuning.maxForcedChunkInterval", "autoTuning.tuneRadii", "blockEntities.forcedChunkMaxInterval",
+		"entities.forcedChunkMaxInterval", "blockEntities.defaultInterval", "entities.defaultAiInterval",
+		"entities.defaultTickInterval", "blockEntities.activeRadiusChunks"};
+
+	/** Puts the options these tests change back to their defaults. */
+	private static void forcedDefaults() {
+		set("autoTuning.tuneIntervals", "true");
+		set("autoTuning.tuneForcedChunks", "true");
+		set("autoTuning.maxForcedChunkInterval", "4");
+		set("autoTuning.tuneRadii", "true");
+		set("blockEntities.forcedChunkMaxInterval", "2");
+		set("entities.forcedChunkMaxInterval", "2");
+		set("blockEntities.defaultInterval", "4");
+		set("entities.defaultAiInterval", "4");
+		set("entities.defaultTickInterval", "4");
+		set("blockEntities.activeRadiusChunks", "4");
+	}
+
+	private static AutoTuner.Values at(int level) {
+		AutoTuner.forceLevel(null, level);
+		return AutoTuner.values();
+	}
+
+	@Test
+	void forcedChunkLimitsRiseRightAfterTheIntervals() {
+		forcedDefaults();
+		AutoTuner.Values three = at(3);
+		assertEquals(20, three.blockEntityInterval(), "levels 1-3: intervals 4 -> 5 -> 10 -> 20");
+		assertEquals(2, three.blockEntityForcedMax());
+		assertEquals(2, three.entityForcedMax());
+		AutoTuner.Values four = at(4);
+		assertEquals(4, four.blockEntityForcedMax(), "level 4 raises the force-loaded limits");
+		assertEquals(4, four.entityForcedMax());
+		assertEquals(4, four.blockEntityRadius(), "radii are not touched yet");
+		assertEquals(3, at(5).blockEntityRadius(), "level 5 starts on the radii");
+		assertEquals(2, at(0).blockEntityForcedMax(), "level 0 puts the limits back");
+		forcedDefaults();
+	}
+
+	@Test
+	void forcedChunkStepCanBeTurnedOff() {
+		forcedDefaults();
+		set("autoTuning.tuneForcedChunks", "false");
+		AutoTuner.Values four = at(4);
+		assertEquals(2, four.blockEntityForcedMax());
+		assertEquals(2, four.entityForcedMax());
+		assertEquals(3, four.blockEntityRadius(), "without the step, level 4 goes to the radii");
+		forcedDefaults();
+	}
+
+	@Test
+	void aLimitOfOneIsNeverRaised() {
+		forcedDefaults();
+		set("entities.forcedChunkMaxInterval", "1");
+		AutoTuner.Values four = at(4);
+		assertEquals(4, four.blockEntityForcedMax());
+		assertEquals(1, four.entityForcedMax(), "1 means never throttle force-loaded entities");
+		set("blockEntities.forcedChunkMaxInterval", "1");
+		assertEquals(3, at(4).blockEntityRadius(), "with both limits at 1 there is no forced-chunk step");
+		forcedDefaults();
+	}
+
+	@Test
+	void forcedChunkLimitsStepThroughSafeValuesUpToTheMaximum() {
+		forcedDefaults();
+		set("autoTuning.maxForcedChunkInterval", "10");
+		assertEquals(4, at(4).entityForcedMax());
+		assertEquals(5, at(5).entityForcedMax());
+		assertEquals(10, at(6).entityForcedMax());
+		assertEquals(4, at(6).blockEntityRadius(), "radii untouched while the limits still rise");
+		assertEquals(3, at(7).blockEntityRadius(), "radii only after the limits reach the maximum");
+		set("autoTuning.maxForcedChunkInterval", "3");
+		assertEquals(2, at(4).entityForcedMax(), "no safe value between 2 and a maximum of 3");
+		forcedDefaults();
+	}
 }
