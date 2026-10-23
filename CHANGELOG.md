@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0-beta.4+1.20.1-forge
+
+Made for personal use; support and updates are not guaranteed.
+
+- As in the Fabric version's 1.0.0-beta.4: tick spreading no longer moves entity types that are never
+  throttled (a rule with `ai` 1 and `tick` 1, bosses and projectiles while excluded from throttling), and
+  `entities.spreadExclude` with `/tickengine spread exclude add|remove|list` keeps chosen types or mods out
+  of it while they stay throttled.
+- GameTests: 6 new ones for spreading exclusions (44 in all); every test now starts from the rules loaded
+  at startup, so a failing test cannot leave a rule behind for the next one.
+
 ## 1.0.0-beta.3+1.20.1-forge
 
 Made for personal use; support and updates are not guaranteed.

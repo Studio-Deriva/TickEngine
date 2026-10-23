@@ -83,6 +83,10 @@ public final class TickEngineConfig {
 		new String[] {
 			"Same as 'rules' but only in one dimension; \"*\" matches every type there. Used only when",
 			"'dimensionRulesEnabled' is true."});
+	public static final TargetList SPREAD_EXCLUDE = new TargetList("spreadExclude", new String[] {
+		"Entity types or whole mods that tick spreading never moves: [\"minecraft:villager\", \"somemod:*\"].",
+		"Types that are never throttled are never moved anyway: a rule with ai 1 and tick 1, and bosses",
+		"and projectiles while they are excluded from throttling. Change live with '/tickengine spread exclude'."});
 
 	// --- auto-tuning ---
 	public static boolean autoTuning = true;
@@ -392,6 +396,7 @@ public final class TickEngineConfig {
 				JsonElement entities = root.get("entities");
 				if (entities != null && entities.isJsonObject()) {
 					ENTITY_RULES.read(entities.getAsJsonObject());
+					SPREAD_EXCLUDE.read(entities.getAsJsonObject());
 				}
 			} catch (Exception e) {
 				TickEngine.LOGGER.error("Could not read {}: the file was NOT changed and the settings already in use (defaults at startup)"
@@ -458,6 +463,8 @@ public final class TickEngineConfig {
 		} else if (section.equals("entities")) {
 			out.append(",\n");
 			ENTITY_RULES.write(out);
+			out.append(",\n");
+			SPREAD_EXCLUDE.write(out);
 		}
 	}
 

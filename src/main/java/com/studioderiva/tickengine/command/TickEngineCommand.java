@@ -56,6 +56,7 @@ import net.minecraftforge.server.permission.nodes.PermissionNode;
  *                            | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
  * /tickengine tuning status | pause | resume | level &lt;n&gt;
  * /tickengine spread [enable | confirm &lt;phrase&gt; | disable]
+ * /tickengine spread exclude list | add &lt;target&gt; | remove &lt;target&gt;
  * </pre>
  *
  * <p>Rule targets go last as greedy text because ids contain ':' which single-word
@@ -120,7 +121,17 @@ public final class TickEngineCommand {
 				.then(Commands.literal("confirm")
 					.then(Commands.argument("phrase", StringArgumentType.greedyString())
 						.executes(TickEngineCommand::spreadConfirm)))
-				.then(Commands.literal("disable").executes(TickEngineCommand::spreadDisable))));
+				.then(Commands.literal("disable").executes(TickEngineCommand::spreadDisable))
+				.then(Commands.literal("exclude")
+					.then(Commands.literal("list").executes(TickEngineCommand::spreadExcludeList))
+					.then(Commands.literal("add")
+						.then(targetArgument(ForgeRegistries.ENTITY_TYPES.getKeys(), false)
+							.executes(TickEngineCommand::spreadExcludeAdd)))
+					.then(Commands.literal("remove")
+						.then(Commands.argument("target", StringArgumentType.greedyString())
+							.suggests((context, builder) -> SharedSuggestionProvider.suggest(
+								TickEngineConfig.SPREAD_EXCLUDE.targets(), builder))
+							.executes(TickEngineCommand::spreadExcludeRemove))))));
 	}
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
@@ -269,6 +280,10 @@ public final class TickEngineCommand {
 		source.sendSuccess(() -> line("State", TickEngineConfig.spreadEntityTicks ? "on" : "off",
 			TickEngineConfig.spreadEntityTicks ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
 		spreadExplanation(source);
+		Set<String> excluded = TickEngineConfig.SPREAD_EXCLUDE.targets();
+		source.sendSuccess(() -> line("Excluded", (excluded.isEmpty() ? "nothing" : String.join(", ", excluded))
+			+ "; types that are never throttled are never moved. Change with '/tickengine spread exclude'.",
+			ChatFormatting.WHITE), false);
 		source.sendSuccess(() -> Component.literal(TickEngineConfig.spreadEntityTicks
 			? " Turn it off with '/tickengine spread disable'."
 			: " Turn it on with '/tickengine spread enable'.").withStyle(ChatFormatting.GRAY), false);
@@ -346,6 +361,51 @@ public final class TickEngineCommand {
 		TickEngineConfig.changed();
 		source.sendSuccess(() -> Component.literal("Tick spreading is off. Counters already moved stay as they are until "
 			+ "those entities are loaded again; that is harmless.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int spreadExcludeList(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Excluded from tick spreading"), false);
+		Set<String> excluded = TickEngineConfig.SPREAD_EXCLUDE.targets();
+		if (excluded.isEmpty()) {
+			source.sendSuccess(() -> Component.literal(" nothing listed").withStyle(ChatFormatting.GRAY), false);
+		}
+		excluded.forEach(target -> source.sendSuccess(() -> Component.literal(" " + target).withStyle(ChatFormatting.WHITE), false));
+		source.sendSuccess(() -> Component.literal(" Also never moved: types that are never throttled (a rule with ai 1 and "
+			+ "tick 1, bosses and projectiles while they are excluded from throttling).").withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static int spreadExcludeAdd(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		if (TickEngineConfig.SPREAD_EXCLUDE.targets().contains(target)) {
+			source.sendSuccess(() -> Component.literal(target + " is already excluded from tick spreading.")
+				.withStyle(ChatFormatting.GRAY), false);
+			return 1;
+		}
+		String error = TickEngineConfig.SPREAD_EXCLUDE.add(target);
+		if (error != null) {
+			source.sendFailure(Component.literal(error));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Excluded from tick spreading: " + target + ". Entities already moved "
+			+ "keep their counter until they are loaded again; that is harmless.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int spreadExcludeRemove(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		if (!TickEngineConfig.SPREAD_EXCLUDE.remove(target)) {
+			source.sendFailure(Component.literal("'" + target + "' is not excluded from tick spreading."));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("No longer excluded from tick spreading: " + target
+			+ ". Its entities are spread from their next load.").withStyle(ChatFormatting.GREEN), true);
 		return 1;
 	}
 

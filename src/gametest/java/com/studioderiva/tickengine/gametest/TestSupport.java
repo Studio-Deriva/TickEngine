@@ -1,5 +1,6 @@
 package com.studioderiva.tickengine.gametest;
 
+import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.tuning.AutoTuner;
 import java.lang.reflect.Field;
@@ -36,8 +37,14 @@ final class TestSupport {
 	/** Config values as loaded at startup (defaults, since run-gametest starts without a config file). */
 	private static final Map<String, String> DEFAULTS = new LinkedHashMap<>();
 
+	/** Rules as loaded at startup, so a test that fails before its cleanup cannot leave rules behind. */
+	private static final Map<String, Integer> BLOCK_ENTITY_RULES = new LinkedHashMap<>();
+	private static final Map<String, ThrottleRules.EntityIntervals> ENTITY_RULES = new LinkedHashMap<>();
+
 	static {
 		TickEngineConfig.options().forEach((key, option) -> DEFAULTS.put(key, option.format()));
+		BLOCK_ENTITY_RULES.putAll(TickEngineConfig.BLOCK_ENTITY_RULES.rules());
+		ENTITY_RULES.putAll(TickEngineConfig.ENTITY_RULES.rules());
 	}
 
 	/** The default of a config option, as loaded at startup. */
@@ -49,7 +56,8 @@ final class TestSupport {
 	}
 
 	/**
-	 * Puts the config back to the defaults, then applies the given key/value pairs. The baseline
+	 * Puts the config back to the defaults (rules as at startup, entities.spreadExclude empty), then applies the
+	 * given key/value pairs. The baseline
 	 * also turns off what would make results depend on timing or test order: auto-tuning (real
 	 * MSPT spikes at startup), waking new entities, tick spreading (it moves tick counters 5 s
 	 * after loading; SpreadTests turn it on), and the cap for force-loaded chunks (GameTest
@@ -63,6 +71,9 @@ final class TestSupport {
 			}
 		}
 		DEFAULTS.forEach((key, value) -> set(key, value));
+		new ArrayList<>(TickEngineConfig.SPREAD_EXCLUDE.targets()).forEach(TickEngineConfig.SPREAD_EXCLUDE::remove);
+		restore(TickEngineConfig.BLOCK_ENTITY_RULES, BLOCK_ENTITY_RULES);
+		restore(TickEngineConfig.ENTITY_RULES, ENTITY_RULES);
 		set("autoTuning.enabled", "false");
 		set("entities.wakeNewEntities", "false");
 		set("entities.spreadTicks", "false");
@@ -74,6 +85,14 @@ final class TestSupport {
 		TickEngineConfig.changed();
 		AutoTuner.forceLevel(server, 0);
 		AutoTuner.resume();
+	}
+
+	private static <V> void restore(ThrottleRules<V> rules, Map<String, V> startup) {
+		new ArrayList<>(rules.rules().keySet()).forEach(target -> rules.remove(target, null));
+		for (String dimension : new ArrayList<>(rules.dimensionRules().keySet())) {
+			new ArrayList<>(rules.dimensionRules().get(dimension).keySet()).forEach(target -> rules.remove(target, dimension));
+		}
+		startup.forEach((target, value) -> rules.set(target, value, null));
 	}
 
 	private static void set(String key, String value) {

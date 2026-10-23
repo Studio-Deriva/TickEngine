@@ -150,6 +150,18 @@ change it.
 A config file written by an earlier version keeps the value it has (`"spreadTicks": false` from
 1.0.0-beta.2 or older): turn it on with `/tickengine spread enable`.
 
+**What is never spread.** Since 1.0.0-beta.4, tick spreading leaves alone:
+
+- entity types that are never throttled, since they have no throttled turn to spread: a rule with
+  `ai` 1 and `tick` 1 (Elder Guardians and Wardens by default, and whatever you exclude from
+  throttling), and bosses and projectiles while they are excluded from throttling;
+- what you list in `entities.spreadExclude`: types (`minecraft:villager`) or whole mods (`somemod:*`),
+  for things you want throttled but not spread. Change it live with
+  `/tickengine spread exclude add <target>`, `remove <target>` and `list`.
+
+A type excluded while the server runs keeps the counters already moved until those entities are loaded
+again; that is harmless.
+
 ## How auto-tuning works
 
 Every `autoTuning.decisionSeconds` (10) TickEngine looks at the average MSPT over that time. Above
@@ -217,6 +229,7 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine tuning level <n>` | Force a level (pauses automatic changes until `resume`) |
 | `/tickengine spread` | Tick spreading: state, what it does, gain and risk |
 | `/tickengine spread enable` / `confirm <phrase>` / `disable` | Turn tick spreading on (after reading the warning and typing the phrase) or off |
+| `/tickengine spread exclude add\|remove <target>` / `list` | Types or mods that tick spreading never moves (`minecraft:villager`, `somemod:*`) |
 
 ## Permissions
 
