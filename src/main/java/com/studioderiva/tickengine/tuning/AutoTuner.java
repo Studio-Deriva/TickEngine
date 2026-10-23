@@ -23,6 +23,7 @@ import net.minecraft.server.players.PlayerList;
  * first:
  * <ol>
  *   <li>default throttle intervals, through safe values only (2, 4, 5, 10, 20)</li>
+ *   <li>the limits for force-loaded chunks without players, through safe values</li>
  *   <li>throttle radii, one chunk per step</li>
  *   <li>simulation distance, one per step</li>
  *   <li>view distance, one per step</li>
@@ -42,7 +43,8 @@ public final class AutoTuner {
 
 	/** Effective values the throttles use. Distances are -1 when auto-tuning does not touch them. */
 	public record Values(int blockEntityInterval, int blockEntityRadius, int entityAiInterval, int entityTickInterval,
-		int entityFullRadius, int entityAiRadius, int simulationDistance, int viewDistance) {
+		int entityFullRadius, int entityAiRadius, int blockEntityForcedMax, int entityForcedMax,
+		int simulationDistance, int viewDistance) {
 	}
 
 	private static MinecraftServer server;
@@ -228,21 +230,35 @@ public final class AutoTuner {
 		int beRadius = TickEngineConfig.activeRadiusChunks;
 		int fullRadius = TickEngineConfig.entityFullRadiusChunks;
 		int aiRadius = TickEngineConfig.entityAiRadiusChunks;
+		int beForced = TickEngineConfig.forcedChunkMaxInterval;
+		int entityForced = TickEngineConfig.entityForcedChunkMaxInterval;
 		int simulation = -1;
 		int view = -1;
 		int remaining = targetLevel;
 
 		if (TickEngineConfig.tuneIntervals) {
 			while (remaining > 0) {
-				int nextBe = nextSafe(beInterval);
-				int nextAi = nextSafe(aiInterval);
-				int nextTick = nextSafe(tickInterval);
+				int nextBe = nextSafe(beInterval, TickEngineConfig.maxTunedInterval);
+				int nextAi = nextSafe(aiInterval, TickEngineConfig.maxTunedInterval);
+				int nextTick = nextSafe(tickInterval, TickEngineConfig.maxTunedInterval);
 				if (nextBe == beInterval && nextAi == aiInterval && nextTick == tickInterval) {
 					break;
 				}
 				beInterval = nextBe;
 				aiInterval = nextAi;
 				tickInterval = nextTick;
+				remaining--;
+			}
+		}
+		if (TickEngineConfig.tuneForcedChunks) {
+			while (remaining > 0) {
+				int nextBe = nextSafe(beForced, TickEngineConfig.maxForcedChunkInterval);
+				int nextEntity = nextSafe(entityForced, TickEngineConfig.maxForcedChunkInterval);
+				if (nextBe == beForced && nextEntity == entityForced) {
+					break;
+				}
+				beForced = nextBe;
+				entityForced = nextEntity;
 				remaining--;
 			}
 		}
@@ -277,7 +293,8 @@ public final class AutoTuner {
 				}
 			}
 		}
-		return new Values(beInterval, beRadius, aiInterval, tickInterval, fullRadius, aiRadius, simulation, view);
+		return new Values(beInterval, beRadius, aiInterval, tickInterval, fullRadius, aiRadius, beForced, entityForced,
+			simulation, view);
 	}
 
 	/** Highest level that still changes something. */
@@ -289,14 +306,14 @@ public final class AutoTuner {
 		return candidate;
 	}
 
-	/** Next safe interval above the current one, within the configured maximum. 1 means "off" and stays. */
-	private static int nextSafe(int interval) {
+	/** Next safe interval above the current one, up to {@code max}. 1 means "off" and stays. */
+	private static int nextSafe(int interval, int max) {
 		if (interval <= 1) {
 			return interval;
 		}
 		for (int safe : SAFE_INTERVALS) {
 			if (safe > interval) {
-				return safe <= TickEngineConfig.maxTunedInterval ? safe : interval;
+				return safe <= max ? safe : interval;
 			}
 		}
 		return interval;
@@ -344,6 +361,8 @@ public final class AutoTuner {
 		change(changes, "block entity interval", before.blockEntityInterval(), after.blockEntityInterval());
 		change(changes, "entity AI interval", before.entityAiInterval(), after.entityAiInterval());
 		change(changes, "entity tick interval", before.entityTickInterval(), after.entityTickInterval());
+		change(changes, "force-loaded block entity limit", before.blockEntityForcedMax(), after.blockEntityForcedMax());
+		change(changes, "force-loaded entity limit", before.entityForcedMax(), after.entityForcedMax());
 		change(changes, "block entity radius", before.blockEntityRadius(), after.blockEntityRadius());
 		change(changes, "entity full radius", before.entityFullRadius(), after.entityFullRadius());
 		change(changes, "entity AI radius", before.entityAiRadius(), after.entityAiRadius());

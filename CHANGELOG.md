@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Same fixes as the Fabric version: turning tick spreading on also moves the entities exactly at the
+  spreading tick, and `/tickengine config set entities.spreadTicks false` turns spreading off.
+- Auto-tuning raises the force-loaded chunk limit from 2 to 4 under load, as in the Fabric version.
+- GameTests for all of it (46 in all).
+
 ## 1.0.0-beta.4+1.20.1-forge
 
 Made for personal use; support and updates are not guaranteed.

@@ -8,6 +8,7 @@ import static com.studioderiva.tickengine.gametest.TestSupport.litFurnace;
 
 import com.studioderiva.tickengine.TickEngine;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
+import com.studioderiva.tickengine.tuning.AutoTuner;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -66,6 +67,19 @@ public final class BlockEntityThrottleTests {
 		BlockPos absolute = helper.absolutePos(FURNACE);
 		helper.getLevel().setChunkForced(absolute.getX() >> 4, absolute.getZ() >> 4, true);
 		measure(helper, WINDOW / 2 - 1, WINDOW / 2 + 1, "burn ticks in a force-loaded chunk capped at 2");
+	}
+
+	@GameTest(template = "floor", batch = "be_forced_tuning", timeoutTicks = 200)
+	public static void autoTuningRaisesTheForcedChunkCap(GameTestHelper helper) {
+		// Without the interval step, the forced-chunk step is level 1.
+		configure(helper, "blockEntities.defaultInterval", "10", "blockEntities.forcedChunkMaxInterval", "2",
+			"entities.forcedChunkMaxInterval", "2", "autoTuning.enabled", "true", "autoTuning.tuneIntervals", "false");
+		BlockPos absolute = helper.absolutePos(FURNACE);
+		helper.getLevel().setChunkForced(absolute.getX() >> 4, absolute.getZ() >> 4, true);
+		check(AutoTuner.forceLevel(helper.getLevel().getServer(), 1) == 1, "level 1 not available");
+		check(AutoTuner.values().blockEntityForcedMax() == 4 && AutoTuner.values().entityForcedMax() == 4,
+			"level 1 should raise both force-loaded limits to 4: " + AutoTuner.values());
+		measure(helper, WINDOW / 4 - 1, WINDOW / 4 + 1, "burn ticks in a force-loaded chunk with the cap raised to 4");
 	}
 
 	@GameTest(template = "floor", batch = "be_rule", timeoutTicks = 200)

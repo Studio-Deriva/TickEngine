@@ -84,7 +84,7 @@ public final class BlockEntityThrottle {
 		}
 		int interval = interval(blockEntity.getType());
 		if (interval > 1 && forcedChunks.contains(chunk)) {
-			interval = Math.min(interval, TickEngineConfig.forcedChunkMaxInterval);
+			interval = Math.min(interval, AutoTuner.values().blockEntityForcedMax());
 		}
 		if (interval <= 1) {
 			tickedNow++;

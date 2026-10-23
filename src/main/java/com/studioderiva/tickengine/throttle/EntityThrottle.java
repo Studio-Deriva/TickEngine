@@ -144,7 +144,7 @@ public final class EntityThrottle {
 		boolean aiZone = distance <= AutoTuner.values().entityAiRadius();
 		int interval = aiZone ? rule.ai() : rule.tick();
 		if (interval > 1 && forcedChunks.contains(chunk)) {
-			interval = Math.min(interval, TickEngineConfig.entityForcedChunkMaxInterval);
+			interval = Math.min(interval, AutoTuner.values().entityForcedMax());
 		}
 		if (interval <= 1) {
 			fullNow++;
@@ -356,8 +356,9 @@ public final class EntityThrottle {
 	}
 
 	/**
-	 * Applies the counter move to entities already past {@link #SPREAD_AT_TICK} when spreading is
-	 * turned on, so they do not wait for their next load. Returns how many were moved.
+	 * Applies the counter move to entities at or past {@link #SPREAD_AT_TICK} when spreading is
+	 * turned on, so they do not wait for their next load (those exactly at it already had their
+	 * check this tick). Returns how many were moved.
 	 */
 	public static int spreadLoadedEntities(MinecraftServer server) {
 		if (!isActive()) {
@@ -366,7 +367,7 @@ public final class EntityThrottle {
 		int moved = 0;
 		for (ServerLevel level : server.getAllLevels()) {
 			for (Entity entity : level.getAllEntities()) {
-				if (entity.tickCount > SPREAD_AT_TICK && canSpread(entity, level)) {
+				if (entity.tickCount >= SPREAD_AT_TICK && canSpread(entity, level)) {
 					spread(entity);
 					moved++;
 				}

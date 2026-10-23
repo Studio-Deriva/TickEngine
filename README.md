@@ -98,7 +98,8 @@ Install it on the **server only**. Players don't need it, and it does nothing on
 - Rules override the default. The most specific wins: dimension + type, type, dimension + mod, mod,
   dimension `*`, default. Moving pistons (`minecraft:piston`) are never throttled by default.
 - Force-loaded chunks without players tick at least every `blockEntities.forcedChunkMaxInterval` ticks
-  (default 2; 1 = never throttle them). Mod chunk loaders that use their own tickets count as far chunks.
+  (default 2; 1 = never throttle them). Under load, auto-tuning may raise this to 4 (see below). Mod chunk
+  loaders that use their own tickets count as far chunks.
 - Throttled ticks happen on game times divisible by the interval, so blocks that act on
   `gameTime % 20` or `% 80` (beacons, vaults, trial spawners, and any modded block that does the same)
   keep working with intervals 2, 4, 5, 10 or 20. `blockEntities.stagger` spreads the work over ticks
@@ -125,7 +126,8 @@ Players are never throttled. Around the nearest player:
   fatigue, darkness) only fire on specific ticks that a throttled AI turn would miss.
 - Ticked normally while it lasts: falling, in lava, in water (except water mobs that breathe there),
   the first `newEntitySeconds` after spawning or loading, animals in love and babies.
-- Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
+- Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2, raised
+  to 4 by auto-tuning under load).
 - Entities only tick within the server's simulation distance, so keep `aiRadiusChunks` below it.
 
 ### Tick spreading (experimental, on by default since 1.0.0-beta.3)
@@ -143,9 +145,11 @@ The risk: logic that waits for one exact counter value in that short range can b
 load, and counter-based timers such as "hurt recently" can end up to 19 ticks early once. Vanilla does
 not wait for exact values there; some mods might. It is on by default in the beta so that it gets
 tested before 1.0.0. If a modded mob or machine misbehaves, `/tickengine spread disable` turns it off
-at once. Turning it back on goes through `/tickengine spread enable`, which explains it and asks you
-to confirm with `/tickengine spread confirm I understand the risks`. `/tickengine config set` cannot
-change it.
+at once.
+In game, turning it back on goes through `/tickengine spread enable`, which explains it and asks you
+to confirm with `/tickengine spread confirm I understand the risks`; `/tickengine config set` can only
+turn it off. Setting `"spreadTicks": true` in the file and running `/tickengine config reload` also
+turns it on, for whoever can edit the file.
 
 A config file written by an earlier version keeps the value it has (`"spreadTicks": false` from
 1.0.0-beta.2 or older): turn it on with `/tickengine spread enable`.
@@ -174,9 +178,11 @@ flip the level back and forth.
 Levels tighten in this order, least visible first, and relax in reverse:
 
 1. default throttle intervals, through safe values only: 4, 5, 10, 20 (explicit rules are never changed)
-2. throttle radii, one chunk per level (block entities down to 2, entity full radius to 1, AI radius to 2)
-3. simulation distance, one per level, down to 4
-4. view distance, one per level, down to 6
+2. the limit for force-loaded chunks without players, 2 -> 4 (`autoTuning.maxForcedChunkInterval`):
+   farms kept loaded with nobody nearby run at a quarter of the speed while the server struggles
+3. throttle radii, one chunk per level (block entities down to 2, entity full radius to 1, AI radius to 2)
+4. simulation distance, one per level, down to 4
+5. view distance, one per level, down to 6
 
 If the load sits close to players, the first levels can't reduce it and auto-tuning goes on to the
 distances. Turn those steps off with `autoTuning.tuneSimulationDistance` and `tuneViewDistance` if you

@@ -49,6 +49,12 @@ public final class SpreadTests {
 		check(run(helper, "/tickengine spread").text().contains("on"), "status does not show it on");
 		check(run(helper, "/tickengine spread confirm I understand the risks").result() == 0,
 			"a confirmation can only be used once");
+		check(run(helper, "/tickengine config set entities.spreadTicks false").result() == 1 && !TickEngineConfig.spreadEntityTicks,
+			"config set may turn spreading off");
+		check(run(helper, "/tickengine config set entities.spreadTicks true").result() == 0 && !TickEngineConfig.spreadEntityTicks,
+			"config set turned spreading back on");
+		run(helper, "/tickengine spread enable");
+		check(run(helper, "/tickengine spread confirm I understand the risks").result() == 1, "confirm again");
 		check(run(helper, "/tickengine spread disable").result() == 1 && !TickEngineConfig.spreadEntityTicks, "disable");
 		configure(helper);
 		helper.succeed();
@@ -291,6 +297,28 @@ public final class SpreadTests {
 						+ " moved by " + (pig.tickCount - pigsBefore[i]) + ", expected " + EntityThrottle.spreadOffset(pig));
 				}
 			}
+			configure(helper);
+			helper.succeed();
+		});
+	}
+
+	/** Entities exactly at the spreading tick when spreading is confirmed are moved too, not skipped forever. */
+	@GameTest(template = "floor", batch = "spread_confirm_at_tick", timeoutTicks = 200)
+	public static void confirmingAtTheSpreadingTickMovesThoseEntities(GameTestHelper helper) {
+		configure(helper);
+		List<Cow> cows = cowsSpawnedTogether(helper);
+		int[] jumps = watchJumps(helper, cows);
+		boolean[] confirmed = {false};
+		helper.onEachTick(() -> {
+			if (!confirmed[0] && cows.get(0).tickCount == EntityThrottle.SPREAD_AT_TICK) {
+				confirmed[0] = true;
+				run(helper, "/tickengine spread enable");
+				check(run(helper, "/tickengine spread confirm I understand the risks").result() == 1, "confirm");
+			}
+		});
+		helper.runAfterDelay(EntityThrottle.SPREAD_AT_TICK + 40, () -> {
+			check(confirmed[0], "the cows never reached the spreading tick");
+			checkMovedByOffset(cows, jumps);
 			configure(helper);
 			helper.succeed();
 		});

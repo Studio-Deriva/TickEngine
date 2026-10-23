@@ -32,6 +32,7 @@ PART 2   The 7 findings and their fixes
 PART 3   What came up while testing
 PART 4   What TickEngine saves, measured
 PART 5   What is still not verified
+PART 6   Mini-audit of the changes since 1.0.0-beta.1
 
 Severities are the ones used during the audit:
 
@@ -373,6 +374,65 @@ If you run TickEngine on a server and find something this audit missed, tell
 us: https://discord.gg/pQPWr7vfHu. A reproduction with the steps, your mod
 list and an HTML report from /tickengine profile start is worth more than any
 amount of further reading.
+
+================================================================================
+PART 6 - MINI-AUDIT OF THE CHANGES SINCE 1.0.0-BETA.1
+================================================================================
+
+Done in October 2026, before 1.0.0, on everything changed in the code since
+the audit above: tick spreading (beta.2), spreading on by default (beta.3),
+the spreading exclusions (beta.4), and the fix to relaxAfterSeconds.
+
+How: a full read of the diff (about 600 lines in six files), the decompiled
+Minecraft 1.21.11 sources for every check on an entity's tick counter, and
+GameTests on the Forge port, which runs the same code. 6 findings: 2 LOW,
+4 INFO. No item duplication path, no data loss.
+
+  6.1 [LOW] Turning spreading on skipped entities exactly at the spreading
+      tick. /tickengine spread confirm moved entities whose counter was
+      above 100; those exactly at 100 had already had their check that tick
+      while spreading was off, so they were never moved until loaded again.
+      Reproduced with a GameTest that confirms on that tick: a cow moved by
+      0 instead of 6. FIXED: entities at 100 or above are moved. Same test
+      passes.
+
+  6.2 [LOW] /tickengine config set entities.spreadTicks false was refused,
+      with a message pointing to /tickengine spread enable. FIXED: config
+      set may turn spreading off (the safe direction); turning it on still
+      needs the confirmation. GameTest added.
+
+  6.3 [INFO] The docs said spreading could only be turned back on through
+      the confirmation. Setting it to true in the file and running
+      /tickengine config reload also does it, for whoever can edit the file.
+      Docs FIXED; behaviour kept on purpose.
+
+  6.4 [INFO] Entities loaded while entity throttling is off, or paused
+      because of ServerCore, are not spread when throttling comes back,
+      until they are loaded again. Effect: tick spikes like before beta.2,
+      nothing else. Not changed.
+
+  6.5 [INFO] A pending spreading confirmation belongs to the sender's name.
+      Two RCON clients share the name "Rcon", so one could confirm what the
+      other asked. Both need the tickengine.config permission. Not changed.
+
+  6.6 [INFO] Spreading may move an entity that is not being throttled at
+      that moment (a player nearby, or force-loaded chunks with
+      forcedChunkMaxInterval 1). Harmless: the move is the same as a load a
+      few ticks earlier. Not changed.
+
+Vanilla checks on the counter (Minecraft 1.21.11), the risk named for
+spreading: exact-value checks run on the client (Copper Golem animations),
+in projectiles (never spread), or before tick 100 in the ominous item
+spawner (which lives at most 120 ticks and is exempt as a new entity).
+Thresholds can be reached up to 19 ticks early once per load: a lead whose
+holder did not load drops after more than 100 ticks (at most 1 tick earlier),
+untamed cats and ocelots may despawn after 2400 ticks. Mods were not
+checked; that is what entities.spreadExclude is for.
+
+The relaxAfterSeconds fix and the exclusion list were reviewed and are
+covered by unit tests (Fabric) and GameTests (Forge, 45 in all, green three
+times in a row after these fixes).
+
 
 ================================================================================
 End of report. Studio Deriva.
