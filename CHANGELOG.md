@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0-beta.4
+
+- Tick spreading no longer moves entity types that are never throttled: a rule with `ai` 1 and `tick` 1
+  (Elder Guardians and Wardens by default), and bosses and projectiles while they are excluded from
+  throttling. They have no throttled turn to spread, so moving them only added risk.
+- New `entities.spreadExclude`: entity types (`minecraft:villager`) or whole mods (`somemod:*`) that tick
+  spreading never moves, while they stay throttled. Change it live with
+  `/tickengine spread exclude add|remove <target>` and `/tickengine spread exclude list`; `/tickengine spread`
+  shows it.
+- Turning spreading on with entities already loaded skips the same entities, and moves nothing while
+  entity throttling is off.
+
 ## 1.0.0-beta.3
 
 - Tick spreading is now **on by default**, so it gets tested in the beta before 1.0.0. It is still

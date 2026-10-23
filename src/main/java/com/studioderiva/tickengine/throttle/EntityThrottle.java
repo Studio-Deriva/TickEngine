@@ -65,6 +65,8 @@ public final class EntityThrottle {
 	private static boolean active;
 
 	private static final Map<ResourceKey<Level>, Map<EntityType<?>, ThrottleRules.EntityIntervals>> intervals = new HashMap<>();
+	/** Types in entities.spreadExclude, by type. */
+	private static final Map<EntityType<?>, Boolean> spreadExcluded = new HashMap<>();
 	private static int intervalsVersion = -1;
 
 	/** The entity whose tick is currently running with a throttled mode, if any. */
@@ -100,10 +102,6 @@ public final class EntityThrottle {
 		if (!active) {
 			return;
 		}
-		if (intervalsVersion != TickEngineConfig.version) {
-			intervals.clear();
-			intervalsVersion = TickEngineConfig.version;
-		}
 		playerDistance.clear();
 		int radius = Math.max(AutoTuner.values().entityFullRadius(), AutoTuner.values().entityAiRadius());
 		for (ServerPlayer player : level.players()) {
@@ -133,7 +131,7 @@ public final class EntityThrottle {
 			return Mode.FULL;
 		}
 		// Only while entity throttling runs: without it, entities never share a throttled turn.
-		if (TickEngineConfig.spreadEntityTicks && entity.tickCount == SPREAD_AT_TICK) {
+		if (TickEngineConfig.spreadEntityTicks && entity.tickCount == SPREAD_AT_TICK && canSpread(entity, level)) {
 			spread(entity);
 		}
 		long chunk = entity.chunkPosition().toLong();
@@ -142,7 +140,7 @@ public final class EntityThrottle {
 			fullNow++;
 			return Mode.FULL;
 		}
-		ThrottleRules.EntityIntervals rule = intervals(entity.getType());
+		ThrottleRules.EntityIntervals rule = intervals(level, entity.getType());
 		boolean aiZone = distance <= AutoTuner.values().entityAiRadius();
 		int interval = aiZone ? rule.ai() : rule.tick();
 		if (interval > 1 && forcedChunks.contains(chunk)) {
@@ -220,19 +218,54 @@ public final class EntityThrottle {
 		return living instanceof Mob mob && mob.getTarget() != null;
 	}
 
-	private static ThrottleRules.EntityIntervals intervals(EntityType<?> type) {
-		Map<EntityType<?>, ThrottleRules.EntityIntervals> cache = intervals.computeIfAbsent(preparedLevel.dimension(),
+	/** Drops what was derived from the config when it changed. */
+	private static void checkCaches() {
+		if (intervalsVersion != TickEngineConfig.version) {
+			intervals.clear();
+			spreadExcluded.clear();
+			intervalsVersion = TickEngineConfig.version;
+		}
+	}
+
+	private static ThrottleRules.EntityIntervals intervals(ServerLevel level, EntityType<?> type) {
+		checkCaches();
+		Map<EntityType<?>, ThrottleRules.EntityIntervals> cache = intervals.computeIfAbsent(level.dimension(),
 			key -> new HashMap<>());
 		ThrottleRules.EntityIntervals rule = cache.get(type);
 		if (rule == null) {
 			Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(type);
 			// Unregistered types cannot be matched by rules: leave them alone.
 			rule = id == null ? new ThrottleRules.EntityIntervals(1, 1) : TickEngineConfig.ENTITY_RULES.resolve(id,
-				preparedLevel.dimension().identifier(), TickEngineConfig.entityDimensionRulesEnabled,
+				level.dimension().identifier(), TickEngineConfig.entityDimensionRulesEnabled,
 				new ThrottleRules.EntityIntervals(AutoTuner.values().entityAiInterval(), AutoTuner.values().entityTickInterval()));
 			cache.put(type, rule);
 		}
 		return rule;
+	}
+
+	/**
+	 * Whether tick spreading may move this entity's counter: not when its type is in
+	 * entities.spreadExclude, and not when its type is never throttled, since it then never has
+	 * a throttled turn to spread.
+	 */
+	public static boolean canSpread(Entity entity, ServerLevel level) {
+		if (entity instanceof Player) {
+			return false;
+		}
+		EntityType<?> type = entity.getType();
+		checkCaches();
+		if (spreadExcluded.computeIfAbsent(type, key -> {
+			Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(key);
+			return id == null || TickEngineConfig.SPREAD_EXCLUDE.matches(id);
+		})) {
+			return false;
+		}
+		if (TickEngineConfig.excludeProjectiles && entity instanceof Projectile
+			|| TickEngineConfig.excludeBosses && type.is(ConventionalEntityTypeTags.BOSSES)) {
+			return false;
+		}
+		ThrottleRules.EntityIntervals rule = intervals(level, type);
+		return rule.ai() > 1 || rule.tick() > 1;
 	}
 
 	/** Marks the entity whose tick is about to run with the given mode; null to clear. */
@@ -325,10 +358,13 @@ public final class EntityThrottle {
 	 * turned on, so they do not wait for their next load. Returns how many were moved.
 	 */
 	public static int spreadLoadedEntities(MinecraftServer server) {
+		if (!isActive()) {
+			return 0;
+		}
 		int moved = 0;
 		for (ServerLevel level : server.getAllLevels()) {
 			for (Entity entity : level.getAllEntities()) {
-				if (!(entity instanceof Player) && entity.tickCount > SPREAD_AT_TICK) {
+				if (entity.tickCount > SPREAD_AT_TICK && canSpread(entity, level)) {
 					spread(entity);
 					moved++;
 				}
@@ -347,6 +383,7 @@ public final class EntityThrottle {
 		playerDistance.clear();
 		forcedChunks = LongSet.of();
 		intervals.clear();
+		spreadExcluded.clear();
 		fullNow = aiSkippedNow = minimalNow = statsTicks = 0;
 		fullLastSecond = aiSkippedLastSecond = minimalLastSecond = 0;
 	}
