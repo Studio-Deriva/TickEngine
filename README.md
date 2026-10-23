@@ -64,7 +64,7 @@ see [Compatibility](#compatibility)).
 | | |
 |---|---|
 | Minecraft | 1.20.1 |
-| Loader | Forge 47 or newer (tested on 47.4.0) |
+| Loader | Forge 47 (tested on 47.2.0, 47.4.0 and 47.4.8) |
 | Java | 17 or newer |
 | Required | nothing else (MixinExtras is bundled in the jar) |
 | Optional | a permissions mod that uses Forge's PermissionAPI, such as LuckPerms (tested with 5.4.102) |
@@ -128,22 +128,27 @@ Players are never throttled. Around the nearest player:
 - Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
 - Entities only tick within the server's simulation distance, so keep `aiRadiusChunks` below it.
 
-### Tick spreading (experimental, off by default)
+### Tick spreading (experimental, on by default since 1.0.0-beta.3)
 
 Entities loaded together (after a restart, in spawn chunks, in force-loaded chunks) start with the
 same tick counter, so all their throttled turns land on the same tick: the average MSPT drops, but
 every few ticks one tick is heavier than a normal tick would be. Measured on a test server right
 after a restart, with 1100 mobs: average 9.2 ms, but 5% of ticks over 35 ms and the slowest at 55 ms.
 
-`/tickengine spread enable` explains what it does and asks you to confirm with
-`/tickengine spread confirm I understand the risks`. When on, each entity's counter is moved forward
-once, by 0–19 ticks, 5 seconds after it is loaded (and right away for entities already loaded), so
-the turns spread out. Same test with it on: average 9.3 ms, 5% of ticks over 10.8 ms, slowest 21 ms.
+Tick spreading moves each entity's counter forward once, by 0–19 ticks, 5 seconds after it is loaded,
+so the turns spread out. It only acts while entity throttling is running. Same test with it on:
+average 9.3 ms, 5% of ticks over 10.8 ms, slowest 21 ms.
 
 The risk: logic that waits for one exact counter value in that short range can be skipped once per
 load, and counter-based timers such as "hurt recently" can end up to 19 ticks early once. Vanilla does
-not wait for exact values there; some mods might. `/tickengine spread disable` turns it off;
-`/tickengine config set` cannot change it.
+not wait for exact values there; some mods might. It is on by default in the beta so that it gets
+tested before 1.0.0. If a modded mob or machine misbehaves, `/tickengine spread disable` turns it off
+at once. Turning it back on goes through `/tickengine spread enable`, which explains it and asks you
+to confirm with `/tickengine spread confirm I understand the risks`. `/tickengine config set` cannot
+change it.
+
+A config file written by an earlier version keeps the value it has (`"spreadTicks": false` from
+1.0.0-beta.2 or older): turn it on with `/tickengine spread enable`.
 
 ## How auto-tuning works
 
@@ -377,8 +382,8 @@ the furnaces and mobs throttled at interval 4:
 
 Without spreading, mobs loaded together run their throttled turn on the same tick: three light ticks,
 then one heavier than a normal tick. Block entity `stagger` barely changes this; the entities cause it.
-Tick spreading removes the spikes but is off by default, because it moves entity tick counters (see
-Tick spreading above).
+Tick spreading removes the spikes. It moves entity tick counters (see Tick spreading above); since
+1.0.0-beta.3 it is on by default.
 
 ## Contributing
 

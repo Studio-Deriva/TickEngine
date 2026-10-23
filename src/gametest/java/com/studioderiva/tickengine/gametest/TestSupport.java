@@ -40,13 +40,19 @@ final class TestSupport {
 		TickEngineConfig.options().forEach((key, option) -> DEFAULTS.put(key, option.format()));
 	}
 
+	/** The default of a config option, as loaded at startup. */
+	static String defaultValue(String key) {
+		return DEFAULTS.get(key);
+	}
+
 	private TestSupport() {
 	}
 
 	/**
 	 * Puts the config back to the defaults, then applies the given key/value pairs. The baseline
 	 * also turns off what would make results depend on timing or test order: auto-tuning (real
-	 * MSPT spikes at startup), waking new entities, and the cap for force-loaded chunks (GameTest
+	 * MSPT spikes at startup), waking new entities, tick spreading (it moves tick counters 5 s
+	 * after loading; SpreadTests turn it on), and the cap for force-loaded chunks (GameTest
 	 * force-loads every test area).
 	 */
 	static void configure(GameTestHelper helper, String... keyValues) {
@@ -59,6 +65,7 @@ final class TestSupport {
 		DEFAULTS.forEach((key, value) -> set(key, value));
 		set("autoTuning.enabled", "false");
 		set("entities.wakeNewEntities", "false");
+		set("entities.spreadTicks", "false");
 		set("blockEntities.forcedChunkMaxInterval", "100");
 		set("entities.forcedChunkMaxInterval", "100");
 		for (int i = 0; i < keyValues.length; i += 2) {

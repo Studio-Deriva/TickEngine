@@ -116,6 +116,28 @@ public final class SpreadTests {
 		});
 	}
 
+	@GameTest(template = "floor", batch = "spread_confirmation", timeoutTicks = 20)
+	public static void spreadingIsOnByDefault(GameTestHelper helper) {
+		check("true".equals(TestSupport.defaultValue("entities.spreadTicks")),
+			"entities.spreadTicks should default to true, is " + TestSupport.defaultValue("entities.spreadTicks"));
+		helper.succeed();
+	}
+
+	@GameTest(template = "floor", batch = "spread_throttle_off", timeoutTicks = 200)
+	public static void spreadingWaitsForEntityThrottling(GameTestHelper helper) {
+		configure(helper, "entities.spreadTicks", "true", "entities.enabled", "false");
+		List<Cow> cows = cowsSpawnedTogether(helper);
+		int[] jumps = watchJumps(helper, cows);
+		helper.runAfterDelay(EntityThrottle.SPREAD_AT_TICK + 20, () -> {
+			for (int i = 0; i < cows.size(); i++) {
+				check(jumps[i] == 0, "cow " + cows.get(i).getId() + " jumped by " + jumps[i]
+					+ " with entity throttling off");
+			}
+			configure(helper);
+			helper.succeed();
+		});
+	}
+
 	@GameTest(template = "floor", batch = "spread_loaded", timeoutTicks = 260)
 	public static void confirmingSpreadsEntitiesAlreadyLoaded(GameTestHelper helper) {
 		configure(helper);

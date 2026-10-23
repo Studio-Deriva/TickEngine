@@ -74,6 +74,13 @@ test {
 	useJUnitPlatform()
 }
 
+// GameTests start from the default config: the file a previous run left behind would override the defaults.
+tasks.matching { it.name == 'runGameTestServer' }.configureEach {
+	doFirst {
+		delete file('run-gametest/config/tickengine.json5')
+	}
+}
+
 mixin {
 	add sourceSets.main, 'tickengine.refmap.json'
 	config 'tickengine.mixins.json'

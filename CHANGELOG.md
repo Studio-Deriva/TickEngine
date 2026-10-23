@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0-beta.3+1.20.1-forge
+
+Made for personal use; support and updates are not guaranteed.
+
+- Tick spreading is now **on by default**, as in the Fabric version's 1.0.0-beta.3. Still experimental:
+  if a modded mob or machine misbehaves, `/tickengine spread disable` turns it off at once. A config file
+  from 1.0.0-beta.2 or older keeps its `"spreadTicks": false`; turn it on with `/tickengine spread enable`.
+- Tick spreading only moves tick counters while entity throttling is running.
+- The jar now declares only what has been tested: Minecraft 1.20.1 and Forge 47 (`[1.20.1,1.20.2)`,
+  `[47,48)`). Before, it also accepted 1.20.2-1.20.6 and any later Forge, none of them tried.
+
 ## 1.0.0-beta.2+1.20.1-forge
 
 Made for personal use; support and updates are not guaranteed.
