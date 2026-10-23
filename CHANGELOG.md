@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-beta.3
+
+- Tick spreading is now **on by default**, so it gets tested in the beta before 1.0.0. It is still
+  experimental: if a modded mob or machine misbehaves, `/tickengine spread disable` turns it off at once.
+  A config file from 1.0.0-beta.2 or older keeps its `"spreadTicks": false`; turn it on with
+  `/tickengine spread enable`.
+- Tick spreading only moves tick counters while entity throttling is running (before, also when entity
+  throttling was off or paused because of ServerCore).
+- The startup log line says whether tick spreading is on.
+- Checked since beta.2: C2ME 0.4.0-alpha.0.28 on Java 25 with Lithium and FerriteCore, the Nether and
+  the End on a real Fabric server, and the cost of the mod itself (within the measurement noise).
+- Documented: in dense farms in force-loaded chunks the default limit (never slower than one tick in
+  two) may not lower the average MSPT; `entities.forcedChunkMaxInterval` 4 did on our test world.
+
 ## 1.0.0-beta.2
 
 - New, experimental and off by default: tick spreading (`/tickengine spread`). Entities loaded together

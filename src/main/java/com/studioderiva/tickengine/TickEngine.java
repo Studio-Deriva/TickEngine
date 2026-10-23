@@ -50,8 +50,8 @@ public final class TickEngine implements DedicatedServerModInitializer {
 			TickEngineCommand.register(dispatcher));
 
 		LOGGER.info("TickEngine initialized (light profiler {}, block entity throttling {}, entity throttling {}, "
-			+ "auto-tuning {})", TickEngineConfig.profilerEnabled ? "on" : "off",
+			+ "tick spreading {}, auto-tuning {})", TickEngineConfig.profilerEnabled ? "on" : "off",
 			TickEngineConfig.blockEntityThrottle ? "on" : "off", TickEngineConfig.entityThrottle ? "on" : "off",
-			TickEngineConfig.autoTuning ? "on" : "off");
+			TickEngineConfig.spreadEntityTicks ? "on" : "off", TickEngineConfig.autoTuning ? "on" : "off");
 	}
 }

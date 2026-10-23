@@ -75,7 +75,7 @@ public final class TickEngineConfig {
 	public static boolean wakeNewEntities = true;
 	public static int newEntitySeconds = 10;
 	public static boolean wakeBreeding = true;
-	public static boolean spreadEntityTicks = false;
+	public static boolean spreadEntityTicks = true;
 	public static final ThrottleRules<ThrottleRules.EntityIntervals> ENTITY_RULES = new ThrottleRules<>(ThrottleRules.ENTITY_INTERVALS,
 		new String[] {
 			"Intervals per type or per mod: \"minecraft:villager\": { \"ai\": 2, \"tick\": 8 }.",
@@ -228,8 +228,9 @@ public final class TickEngineConfig {
 				+ "at normal speed.",
 			() -> wakeBreeding, v -> wakeBreeding = v));
 		register(Option.bool("entities.spreadTicks",
-			"EXPERIMENTAL, off by default. Turn it on with '/tickengine spread enable', which explains it\n"
-				+ "and asks for confirmation; '/tickengine config set' cannot change it.\n"
+			"EXPERIMENTAL, on by default since 1.0.0-beta.3. Turn it off with '/tickengine spread disable'\n"
+				+ "or false here; turning it back on goes through '/tickengine spread enable', which explains it\n"
+				+ "and asks for confirmation. '/tickengine config set' cannot change it.\n"
 				+ "Throttled entities run their full tick when their tick counter is a multiple of the\n"
 				+ "interval. Entities loaded together (after a restart, in spawn or force-loaded chunks) share\n"
 				+ "that counter, so they all run on the same tick: one heavy tick, then light ones. When on,\n"

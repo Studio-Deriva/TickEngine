@@ -126,14 +126,15 @@ public final class EntityThrottle {
 		if (!(entity.level() instanceof ServerLevel level) || entity instanceof Player) {
 			return Mode.FULL;
 		}
-		if (TickEngineConfig.spreadEntityTicks && entity.tickCount == SPREAD_AT_TICK) {
-			spread(entity);
-		}
 		if (level != preparedLevel || level.getGameTime() != preparedGameTime) {
 			prepare(level);
 		}
 		if (!active) {
 			return Mode.FULL;
+		}
+		// Only while entity throttling runs: without it, entities never share a throttled turn.
+		if (TickEngineConfig.spreadEntityTicks && entity.tickCount == SPREAD_AT_TICK) {
+			spread(entity);
 		}
 		long chunk = entity.chunkPosition().toLong();
 		int distance = playerDistance.get(chunk);

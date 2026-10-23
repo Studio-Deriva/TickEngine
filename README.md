@@ -30,6 +30,8 @@ ServerCore, not instead of them.
 - **Entity and AI throttling.** Three zones around the nearest player: everything normal close by, AI
   and pathfinding less often a bit farther, the whole tick less often beyond. Items and mobs still
   despawn on time, and far mobs still eat, pick targets and flee.
+- **Tick spreading.** Entities loaded together are spread over different ticks, so throttling does
+  not trade a lower average for heavier single ticks. Experimental, on by default in the beta.
 - **Sensible exceptions.** Never throttled: players, projectiles, vehicles with passengers, bosses,
   mobs in combat, Elder Guardians, Wardens and moving pistons. Ticked normally while falling, in lava,
   just spawned, in love or growing up.
@@ -112,22 +114,36 @@ Players are never throttled. Around the nearest player:
 - Force-loaded chunks without players are never slower than `entities.forcedChunkMaxInterval` (2).
 - Entities only tick within the server's simulation distance, so keep `aiRadiusChunks` below it.
 
-### Tick spreading (experimental, off by default)
+### Tick spreading (experimental, on by default since 1.0.0-beta.3)
 
 Entities loaded together (after a restart, in spawn chunks, in force-loaded chunks) start with the
 same tick counter, so all their throttled turns land on the same tick: the average MSPT drops, but
-every few ticks one tick is heavier than a normal tick would be. Measured on a test server right
-after a restart, with 1100 mobs: average 9.2 ms, but 5% of ticks over 35 ms and the slowest at 55 ms.
+every few ticks one tick is heavier than a normal tick would be.
 
-`/tickengine spread enable` explains what it does and asks you to confirm with
-`/tickengine spread confirm I understand the risks`. When on, each entity's counter is moved forward
-once, by 0–19 ticks, 5 seconds after it is loaded (and right away for entities already loaded), so
-the turns spread out. Same test with it on: average 9.3 ms, 5% of ticks over 10.8 ms, slowest 21 ms.
+Tick spreading moves each entity's counter forward once, by 0–19 ticks, 5 seconds after it is loaded,
+so the turns spread out. It only acts while entity throttling is running. Measured right after a
+restart:
+
+| | Average | Slowest 5% of ticks | Slowest tick |
+|---|---|---|---|
+| Forge port, 1100 mobs, spreading off | 9.2 ms | 35 ms | 55 ms |
+| Forge port, 1100 mobs, spreading on | 9.3 ms | 10.8 ms | 21 ms |
+| Fabric, 1500 mobs, spreading off | 12.2–12.8 ms | 17.8–20.0 ms | not measured |
+| Fabric, 1500 mobs, spreading on | 12.2–12.4 ms | 16.5 ms | not measured |
+
+On Fabric, "slowest 5%" is the median P95 of `/tick query` over 180 s, two runs each; the same server
+without TickEngine had 15.7–15.9 ms.
 
 The risk: logic that waits for one exact counter value in that short range can be skipped once per
 load, and counter-based timers such as "hurt recently" can end up to 19 ticks early once. Vanilla does
-not wait for exact values there; some mods might. `/tickengine spread disable` turns it off;
+not wait for exact values there; some mods might. It is on by default in the beta so that it gets
+tested before 1.0.0. If a modded mob or machine misbehaves, `/tickengine spread disable` turns it off
+at once; tell us which one it was. Turning it back on goes through `/tickengine spread enable`, which
+explains it and asks you to confirm with `/tickengine spread confirm I understand the risks`.
 `/tickengine config set` cannot change it.
+
+A config file written by an earlier version keeps the value it has (`"spreadTicks": false` from
+1.0.0-beta.2 or older): turn it on with `/tickengine spread enable`.
 
 ## How auto-tuning works
 
@@ -215,8 +231,9 @@ With LuckPerms (tested with 5.5.21) or any fabric-permissions-api provider, use 
     TickEngine's auto-tuning only adjusts its own throttles.
 
   Admins get a notice on join and every `notices.intervalMinutes` (30) while either applies.
-- **C2ME**: **not verified.** Every C2ME build for 1.21.11 needs Java 25, and we have not run it.
-  TickEngine is built for Java 21 and should load on Java 25 as well; tell us how it goes.
+- **C2ME**: tested with 0.4.0-alpha.0.28 on Java 25 (every C2ME build for 1.21.11 needs Java 25),
+  together with Lithium and FerriteCore: no conflicts, new chunks generated while throttling, throttled
+  entities kept across chunk unloads and reloads. TickEngine is built for Java 21 and runs on Java 25.
 - **Modded block entities and entities** are throttled like vanilla ones. If a mod's machine or mob
   misbehaves when far away, give it a rule with interval 1 and tell us which one it is.
 
@@ -244,7 +261,15 @@ Checked after the audit:
   not set, and admin notices only for players with `tickengine.notify`.
 - **Tick spikes.** The audit saw the slowest ticks get worse with throttling and guessed at block
   entity stagger. Measured since: the cause is entities loaded together sharing their throttled turn.
-  Tick spreading (above) fixes it, as an opt-in; measured on the Forge port, which runs the same code.
+  Tick spreading (above) fixes it; measured on the Forge port, which runs the same code, and again on
+  Fabric (the slowest 5% of ticks from 18-20 ms to 16.5 ms).
+- **C2ME, the Nether and the End** on a real Fabric server, and the cost of the mod itself: installed
+  with everything off, or with only the light profiler, it is within the measurement noise.
+- **Dense farms in force-loaded chunks.** On a test world with 1500 mobs packed in one pen in
+  force-loaded chunks, the defaults (never slower than one tick in two there) did not lower the average
+  MSPT: a mob's throttled turn costs more than a normal tick, and much of what mobs do is paced by game
+  time. Raising `entities.forcedChunkMaxInterval` to 4 saved about 10-30% on the same world. Far areas
+  without force-loading use interval 4 by default.
 
 ## Contributing
 

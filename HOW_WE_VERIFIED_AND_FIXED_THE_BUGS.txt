@@ -1,7 +1,7 @@
 ================================================================================
 TICKENGINE - HOW WE VERIFIED AND FIXED THE BUGS
 ================================================================================
-Project : TickEngine 1.0.0-beta.1
+Project : TickEngine 1.0.0-beta.1, updated for 1.0.0-beta.2
 Stack   : Minecraft 1.21.11 / Fabric loader 0.19.5 / Fabric API 0.141.6+1.21.11 /
           Mojang mappings / Java 21
 Bundled : fabric-permissions-api 0.6.1
@@ -87,7 +87,8 @@ What the findings rest on:
     Physics Mod, under loads built to push the server past 50 ms per tick.
 
 What was NOT used: no debugger session (the IDE bridge was not available),
-no run on the reference hardware, no C2ME. See PART 5.
+no run on the reference hardware. C2ME was not run during the audit; it was
+checked later, see PART 5.
 
 
 ================================================================================
@@ -187,8 +188,8 @@ notices.
 FIXED - command/TickEngineCommand.java. Bare /tickengine shows the status only
 with tickengine.status; otherwise it lists the subcommands the user may run.
 
-Not reproduced with a player: it needs a permissions mod to grant nodes
-separately. See PART 5.
+Not reproduced with a player during the audit: it needs a permissions mod to
+grant nodes separately. Checked after it with LuckPerms 5.5.21 (PART 5).
 
 
 --------------------------------------------------------------------------------
@@ -327,6 +328,44 @@ force-loaded chunks without players), far mobs react later. In the sheep test
 of 2.1, 17-18 of 20 far sheep regrew their wool in 180 s, where all 40 did
 without throttling.
 
+  4. Measured again with 1.0.0-beta.2, Java 21 (October 2026). Real Fabric
+     server, Fabric API, Lithium and FerriteCore, ActiveProcessorCount=2 and
+     -Xmx3G. A flat world built once and copied before every run: 512 hoppers
+     moving stone between barrels, 256 lit furnaces, 1500 mobs (600
+     villagers, 400 cows, 200 sheep, 150 chickens, 150 pigs) in one glass pen,
+     all in force-loaded chunks, no player. Each run restarts the server, so
+     every mob is loaded at the same moment. 60 s warm-up, 180 s measured,
+     two rounds, variants interleaved.
+
+       variant                          avg MSPT       P95 (median)   slowest P99
+       no TickEngine                    12.56 12.57    15.9 15.7      38.4 26.6
+       installed, everything off        12.71 12.56    15.8 16.0      34.0 26.7
+       light profiler only              11.88 12.56    15.7 16.1      28.2 49.4
+       defaults                         12.80 12.20    17.8 20.0      40.9 32.9
+       defaults + tick spreading        12.44 12.24    16.5 16.5      27.4 33.2
+
+     The cost of the mod itself, installed and off or with only the light
+     profiler, is within the noise. The run-to-run spread is about 0.7 ms.
+
+     The defaults saved nothing on the average here, against -36% in test 1.
+     Throttling worked as configured: 50% of block entity ticks and 50% of
+     entity ticks skipped (force-loaded chunks never go below one tick in
+     two). But a mob's throttled turn cost about 1.6-1.7 times a normal
+     tick (villagers 24 µs instead of 14.5 µs). With a temporary counter
+     (not in the released jar), the paths computed per 10 s went from about
+     750 to about 650 when only a quarter of the mob ticks ran: much of what
+     these mobs do is paced by game time, not by how often they tick. Path
+     timeouts, a suspect at first, were 0-3 per 10 s with throttling on or
+     off.
+     Raising forcedChunkMaxInterval to 4 brought the average down by about
+     10-30% on the same world. A guess, not verified: test 1 ran 0.4.0,
+     before the fix in 2.1, when half of the far mobs only updated the goals
+     they were already running, which is cheaper.
+
+     Tick spreading took the P95 from 17.8-20.0 ms to 16.5 ms, close to the
+     server without TickEngine, and the slowest P99 down in one round of two.
+     The average did not change.
+
 
 ================================================================================
 PART 5 - WHAT IS STILL NOT VERIFIED
@@ -334,26 +373,27 @@ PART 5 - WHAT IS STILL NOT VERIFIED
 
 This is the honest boundary of the work. None of the following is a known
 defect, unless it says so; all of it is something nobody has watched happen.
+Updated for 1.0.0-beta.2.
 
   * The reference hardware. Every measurement ran on a Mac. The relative saving
     should be similar on an old 2-core PC; it has not been measured there.
 
-  * C2ME. All its builds for 1.21.11 need Java 25 and it was not run.
-    Compatibility is unknown.
+  * Long runs. No server stayed up for more than a few hours. Memory growth
+    over days, and behaviour across many restarts with players on, have not
+    been watched. Chunk unloads and reloads with throttled entities were
+    checked (the same 270 entities back, throttling resumed), not over days.
 
-  * Long runs. No server stayed up for more than about an hour. Memory
-    growth over many hours, and behaviour across many chunk unloads and
-    reloads with throttled entities, have not been watched.
+  * Other servers. The beta has not been run by anyone outside the studio
+    yet.
 
-  * The Nether and the End. Every test ran in the Overworld. The code does not
-    care about the dimension, but farms typical of those dimensions (piglins,
-    endermen, shulkers) were not looked at.
+  * Dense farms in force-loaded chunks. In the beta.2 measurement (PART 4.4)
+    the defaults did not lower the average there. Whether other layouts
+    behave the same, and how much of it comes from the full goal selection
+    of 2.1, has not been measured.
 
-  * The P95 effect in PART 4.3 is a guess. Nobody has compared stagger on and
-    off under the same load.
-
-  * Permissions with a permissions mod. Finding 2.4 and the separate nodes in
-    general were checked on the code only; LuckPerms was never installed.
+  * Tick spreading on modded mobs and machines. It moves each entity's tick
+    counter once after loading. Vanilla does not wait for exact counter
+    values there; mods were not checked one by one.
 
   * Mods with their own chunk loaders. Areas they keep loaded with their own
     tickets are treated as far chunks, not as force-loaded ones. That is known;
@@ -361,13 +401,37 @@ defect, unless it says so; all of it is something nobody has watched happen.
 
   * Modded machines and mobs beyond the tested set (Simple Copper Pipes,
     CC: Tweaked, Guard Villagers, Friends&Foes, Mutant Monsters, Oh The Biomes
-    We've Gone). Create does not exist for Fabric 1.21.11 and was not tested.
-    Logic in other mods that relies on ticking every tick, far from players,
-    may slow down or misbehave; a rule with interval 1 turns throttling off for
-    it.
+    We've Gone; on the Forge port, a 252-mod pack). Create does not exist for
+    Fabric 1.21.11 and was not tested there. Logic in other mods that relies
+    on ticking every tick, far from players, may slow down or misbehave; a
+    rule with interval 1 turns throttling off for it.
 
-  * Spark. Measurements used /tick query and the process CPU time, not a
-    sampling profiler.
+  * Spark. Measurements used /tick query, the process CPU time, TickEngine's
+    own profiler and Java Flight Recorder, not spark.
+
+Checked since beta.1, and no longer on this list:
+
+  * C2ME 0.4.0-alpha.0.28 on Java 25 (Temurin 25.0.5), with Lithium and
+    FerriteCore: no error or warning involving TickEngine, 377 new chunks
+    generated in the Overworld and the Nether while throttling, chunk unloads
+    and reloads with throttled entities. C2ME's own warnings about optional
+    mods it did not find (Starlight, ScalableLux, native math on macOS) are
+    unrelated.
+
+  * The Nether and the End on a real Fabric server: piglins, zombified
+    piglins, hoglins, magma cubes, endermen, shulkers and endermites, hoppers
+    and furnaces, all throttled; per-dimension rules switch throttling off in
+    one dimension and back on when removed.
+
+  * Permissions with LuckPerms 5.5.21: granted and denied nodes, the fall
+    back to the operator level, admin notices only with tickengine.notify.
+
+  * The cost of the mod itself: installed with everything off, or with only
+    the light profiler, it is within the noise (PART 4.4).
+
+  * The P95 guess in PART 4.3: the cause is entities loaded together sharing
+    their throttled turn, not block entity stagger. Tick spreading addresses
+    it (PART 4.4).
 
 If you run TickEngine on a server and find something this audit missed, tell
 us: https://discord.gg/pQPWr7vfHu. A reproduction with the steps, your mod
