@@ -4,6 +4,7 @@ import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
+//? if >=1.21.2
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.goal.GoalSelector;
@@ -55,9 +56,18 @@ abstract class MobMixin {
 		return !EntityThrottle.isAiSkipped((Mob) (Object) this);
 	}
 
+	// customServerAiStep gained its ServerLevel parameter in 1.21.2.
+	//? if >=1.21.2 {
 	@WrapWithCondition(method = "serverAiStep",
 		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Mob;customServerAiStep(Lnet/minecraft/server/level/ServerLevel;)V"))
 	private boolean tickengine$customAi(Mob mob, ServerLevel level) {
 		return !EntityThrottle.isAiSkipped(mob);
 	}
+	//?} else {
+	/*@WrapWithCondition(method = "serverAiStep",
+		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Mob;customServerAiStep()V"))
+	private boolean tickengine$customAi(Mob mob) {
+		return !EntityThrottle.isAiSkipped(mob);
+	}
+	*///?}
 }

@@ -7,7 +7,7 @@
 	"authors": ["Studio Deriva"],
 	"contact": {
 		"sources": "https://github.com/Studio-Deriva/TickEngine",
-		"issues": "https://discord.gg/pQPWr7vfHu"
+		"issues": "https://github.com/Studio-Deriva/TickEngine/issues"
 	},
 	"license": "MIT",
 	"icon": "assets/tickengine/icon.png",
@@ -18,7 +18,7 @@
 	"mixins": ["tickengine.mixins.json"],
 	"depends": {
 		"fabricloader": ">=0.19.5",
-		"minecraft": "~1.21.11",
+		"minecraft": "${minecraft_range}",
 		"java": ">=21",
 		"fabric-api": "*",
 		"fabric-permissions-api-v0": "*"

@@ -4,8 +4,31 @@ pluginManagement {
 			name = 'Fabric'
 			url = 'https://maven.fabricmc.net/'
 		}
+		maven {
+			name = 'KikuGie'
+			url = 'https://maven.kikugie.dev/releases'
+		}
 		mavenCentral()
 		gradlePluginPortal()
+	}
+}
+
+plugins {
+	id 'dev.kikugie.stonecutter' version '0.9.8'
+}
+
+stonecutter {
+	kotlinController = false
+	centralScript = "build.gradle"
+
+	// One jar per node. The code changes at 1.21.2, 1.21.5 and 1.21.11; the extra nodes exist
+	// because each bundles the fabric-permissions-api build made for its Minecraft range.
+	// The range each node declares is set by mod.minecraft_range in versions/<node>/gradle.properties.
+	// Each node is the lowest version of its range: compiling there catches APIs that only appear
+	// later in the range (1.21.4 ships a newer Gson than 1.21.2, for example).
+	create(rootProject) {
+		versions '1.21.1', '1.21.2', '1.21.5', '1.21.6', '1.21.9', '1.21.11'
+		vcsVersion = '1.21.11'
 	}
 }
 

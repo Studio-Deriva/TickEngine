@@ -8,12 +8,14 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.studioderiva.tickengine.TickEngine;
+import com.studioderiva.tickengine.compat.MinecraftCompat;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
+import com.studioderiva.tickengine.report.DiagnosticReport;
 import com.studioderiva.tickengine.report.HtmlReport;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
@@ -25,7 +27,6 @@ import java.util.Set;
 import java.util.stream.Stream;
 import java.util.Locale;
 import java.util.function.Predicate;
-import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -33,14 +34,11 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.permissions.PermissionLevel;
 
 /**
  * {@code /tickengine} command tree.
@@ -57,6 +55,7 @@ import net.minecraft.server.permissions.PermissionLevel;
  * /tickengine tuning status | pause | resume | level &lt;n&gt;
  * /tickengine spread [enable | confirm &lt;phrase&gt; | disable]
  * /tickengine spread exclude list | add &lt;target&gt; | remove &lt;target&gt;
+ * /tickengine report [general | blockentity &lt;type&gt; | entity &lt;type&gt; | mod &lt;mod id&gt;]
  * </pre>
  *
  * <p>Rule targets go last as greedy text because ids contain ':' which single-word
@@ -70,7 +69,8 @@ public final class TickEngineCommand {
 
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
 		dispatcher.register(Commands.literal("tickengine")
-			.requires(permission("status").or(permission("top")).or(permission("profile")).or(permission("config")))
+			.requires(permission("status").or(permission("top")).or(permission("profile")).or(permission("config"))
+				.or(permission("report")))
 			.executes(TickEngineCommand::root)
 			.then(Commands.literal("status")
 				.requires(permission("status"))
@@ -131,13 +131,21 @@ public final class TickEngineCommand {
 						.then(Commands.argument("target", StringArgumentType.greedyString())
 							.suggests((context, builder) -> SharedSuggestionProvider.suggest(
 								TickEngineConfig.SPREAD_EXCLUDE.targets(), builder))
-							.executes(TickEngineCommand::spreadExcludeRemove))))));
+							.executes(TickEngineCommand::spreadExcludeRemove)))))
+			.then(Commands.literal("report")
+				.requires(permission("report"))
+				.executes(TickEngineCommand::reportMenu)
+				.then(Commands.literal(DiagnosticReport.Kind.GENERAL.word)
+					.executes(context -> report(context, DiagnosticReport.Kind.GENERAL, "")))
+				.then(reportKind(DiagnosticReport.Kind.BLOCK_ENTITY))
+				.then(reportKind(DiagnosticReport.Kind.ENTITY))
+				.then(reportKind(DiagnosticReport.Kind.MOD))));
 	}
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
 	private static Predicate<CommandSourceStack> permission(String name) {
 		String node = TickEngine.MOD_ID + "." + name;
-		return source -> Permissions.check(source, node, PermissionLevel.byId(TickEngineConfig.commandOpLevel));
+		return source -> MinecraftCompat.check(source, node, TickEngineConfig.commandOpLevel);
 	}
 
 	// --- status ---
@@ -148,7 +156,7 @@ public final class TickEngineCommand {
 		if (permission("status").test(source)) {
 			return status(context);
 		}
-		String available = Stream.of("top", "profile", "config")
+		String available = Stream.of("top", "profile", "config", "report")
 			.filter(name -> permission(name).test(source))
 			.map(name -> "/tickengine " + name)
 			.reduce((a, b) -> a + ", " + b)
@@ -313,7 +321,10 @@ public final class TickEngineCommand {
 			source.sendSuccess(() -> Component.literal("Tick spreading is already on.").withStyle(ChatFormatting.GRAY), false);
 			return 1;
 		}
-		pendingSpreadConfirmations.put(source.getTextName(), System.currentTimeMillis() + SPREAD_CONFIRM_MILLIS);
+		long now = System.currentTimeMillis();
+		// Requests nobody confirmed would otherwise stay in the map until the server stops.
+		pendingSpreadConfirmations.values().removeIf(deadline -> deadline < now);
+		pendingSpreadConfirmations.put(source.getTextName(), now + SPREAD_CONFIRM_MILLIS);
 		source.sendSuccess(() -> header("Tick spreading: read before turning it on"), false);
 		spreadExplanation(source);
 		String command = "/tickengine spread confirm " + SPREAD_PHRASE;
@@ -322,8 +333,8 @@ public final class TickEngineCommand {
 			.append(Component.literal(command).withStyle(style -> style
 				.withColor(ChatFormatting.WHITE)
 				.withUnderlined(true)
-				.withClickEvent(new ClickEvent.SuggestCommand(command))
-				.withHoverEvent(new HoverEvent.ShowText(Component.literal("Click to put it in the chat box"))))),
+				.withClickEvent(MinecraftCompat.suggestCommand(command))
+				.withHoverEvent(MinecraftCompat.showText(Component.literal("Click to put it in the chat box"))))),
 			false);
 		return 1;
 	}
@@ -478,8 +489,8 @@ public final class TickEngineCommand {
 				int landingY = landingY(source.getServer().getLevel(entry.worstDimension()), start);
 				String landing = entry.worstPos().getX() + " " + landingY + " " + entry.worstPos().getZ();
 				name = name.withStyle(style -> style
-					.withClickEvent(new ClickEvent.RunCommand("/execute in " + dimension + " run tp @s " + landing))
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal(
+					.withClickEvent(MinecraftCompat.runCommand("/execute in " + dimension + " run tp @s " + landing))
+					.withHoverEvent(MinecraftCompat.showText(Component.literal(
 						"Slowest instance: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one tick\n"
 							+ dimension + " " + coordinates + "\nClick to teleport")))
 					.withUnderlined(true));
@@ -495,14 +506,15 @@ public final class TickEngineCommand {
 
 	/**
 	 * First height at or above {@code start} with two free blocks for the player, checked when the
-	 * list is printed. Falls back to {@code start} when nothing free is found nearby.
+	 * list is printed. Falls back to {@code start} when nothing free is found nearby, or when the chunk
+	 * is not loaded: reading a block there would load it from disk on the server thread.
 	 */
 	private static int landingY(ServerLevel level, BlockPos start) {
-		if (level == null) {
+		if (level == null || !level.isLoaded(start)) {
 			return start.getY();
 		}
 		BlockPos.MutableBlockPos pos = start.mutable();
-		int top = Math.min(level.getMaxY(), start.getY() + 64);
+		int top = Math.min(MinecraftCompat.maxY(level), start.getY() + 64);
 		for (int y = start.getY(); y < top; y++) {
 			if (isFree(level, pos.setY(y)) && isFree(level, pos.setY(y + 1))) {
 				return y;
@@ -585,6 +597,98 @@ public final class TickEngineCommand {
 		}));
 	}
 
+	// --- report ---
+
+	/** Bare /tickengine report: what the problem is about, as clickable choices. */
+	private static int reportMenu(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Report a problem"), false);
+		source.sendSuccess(() -> Component.literal(" What is the problem about? Click one:").withStyle(ChatFormatting.GRAY), false);
+		source.sendSuccess(() -> Component.literal(" ")
+			.append(reportChoice("General", "/tickengine report general", true, "Nothing in particular: lag, a crash, odd behaviour"))
+			.append(Component.literal("  "))
+			.append(reportChoice("Block entity", "/tickengine report blockentity ", false, "A machine, chest, hopper..."))
+			.append(Component.literal("  "))
+			.append(reportChoice("Entity", "/tickengine report entity ", false, "A mob, item, vehicle..."))
+			.append(Component.literal("  "))
+			.append(reportChoice("Mod", "/tickengine report mod ", false, "Everything from one mod")), false);
+		source.sendSuccess(() -> Component.literal(" For the last three, finish the command with the name (Tab lists them). "
+			+ "TickEngine collects versions, its settings, the rule for that target, profiler numbers and the mod list, and "
+			+ "gives you a link that opens a GitHub issue to review and submit. It sends nothing itself.")
+			.withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static MutableComponent reportChoice(String label, String command, boolean runNow, String hint) {
+		return Component.literal("[" + label + "]").withStyle(style -> style
+			.withColor(ChatFormatting.AQUA)
+			.withClickEvent(runNow ? MinecraftCompat.runCommand(command) : MinecraftCompat.suggestCommand(command))
+			.withHoverEvent(MinecraftCompat.showText(Component.literal(hint))));
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> reportKind(DiagnosticReport.Kind kind) {
+		return Commands.literal(kind.word)
+			.then(Commands.argument("target", StringArgumentType.greedyString())
+				.suggests((context, builder) -> SharedSuggestionProvider.suggest(DiagnosticReport.suggestions(kind), builder))
+				.executes(context -> report(context, kind, StringArgumentType.getString(context, "target").trim())));
+	}
+
+	private static int report(CommandContext<CommandSourceStack> context, DiagnosticReport.Kind kind, String target) {
+		CommandSourceStack source = context.getSource();
+		MinecraftServer server = source.getServer();
+		String error = DiagnosticReport.check(kind, target);
+		if (error != null) {
+			source.sendFailure(Component.literal(error));
+			return 0;
+		}
+		DiagnosticReport.Result result = DiagnosticReport.build(server, kind, target);
+		DiagnosticReport.writeAsync(server, result).whenComplete((file, writeError) -> server.execute(() -> {
+			String path = null;
+			if (writeError != null) {
+				TickEngine.LOGGER.error("Could not write the diagnostic report", writeError);
+			} else {
+				path = server.getServerDirectory().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
+			}
+			sendReport(source, result, path);
+		}));
+		return 1;
+	}
+
+	/** The link for players, who can click it; consoles get the file and the address of the new-issue page. */
+	private static void sendReport(CommandSourceStack source, DiagnosticReport.Result result, String path) {
+		source.sendSuccess(() -> header("Report ready: " + result.title().substring("[Report] ".length())), false);
+		source.sendSuccess(() -> Component.literal(" It holds versions, TickEngine's settings, the rule for the target, profiler "
+			+ "numbers and the mod list. No player names, addresses or coordinates. TickEngine sends nothing: you review "
+			+ "and submit it yourself.").withStyle(ChatFormatting.GRAY), false);
+		boolean player = source.getPlayer() != null;
+		if (player) {
+			source.sendSuccess(() -> Component.literal(" 1. ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal("[Open the GitHub issue]").withStyle(style -> style
+					.withColor(ChatFormatting.AQUA)
+					.withUnderlined(true)
+					.withClickEvent(MinecraftCompat.openUrl(result.issueUrl()))
+					.withHoverEvent(MinecraftCompat.showText(Component.literal(
+						"Opens a draft on GitHub in your browser. Nothing is posted until you press Submit.")))))
+				.append(Component.literal(" and describe what is going wrong.").withStyle(ChatFormatting.GRAY)), false);
+		} else {
+			source.sendSuccess(() -> Component.literal(" 1. Open " + result.shortUrl()
+				+ " in a browser, describe the problem and paste the file below into it.").withStyle(ChatFormatting.GRAY), false);
+		}
+		if (path != null) {
+			// The console link has only the title, so there the file is the whole report.
+			source.sendSuccess(() -> Component.literal(" 2. " + (!player ? "Attach or paste " : result.trimmed() ? "Attach "
+				: "Attach (optional, has more detail) ") + "the file ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
+			if (player && result.trimmed()) {
+				source.sendSuccess(() -> Component.literal(" The link had to leave some lines out to stay short; the file has them all.")
+					.withStyle(ChatFormatting.YELLOW), false);
+			}
+		} else {
+			source.sendFailure(Component.literal("Could not write the report file, see the server log."
+				+ (player && result.trimmed() ? " The link is missing some lines." : "")));
+		}
+	}
+
 	// --- config ---
 
 	private static int configList(CommandContext<CommandSourceStack> context) {
@@ -593,8 +697,8 @@ public final class TickEngineCommand {
 		TickEngineConfig.options().forEach((key, option) ->
 			source.sendSuccess(() -> line(key, option.format(), ChatFormatting.WHITE)
 				.withStyle(style -> style
-					.withHoverEvent(new HoverEvent.ShowText(Component.literal(option.comment)))
-					.withClickEvent(new ClickEvent.SuggestCommand("/tickengine config set " + key + " "))), false));
+					.withHoverEvent(MinecraftCompat.showText(Component.literal(option.comment)))
+					.withClickEvent(MinecraftCompat.suggestCommand("/tickengine config set " + key + " "))), false));
 		return 1;
 	}
 
@@ -644,6 +748,7 @@ public final class TickEngineCommand {
 	}
 
 	private static int configReload(CommandContext<CommandSourceStack> context) {
+		boolean spreadBefore = TickEngineConfig.spreadEntityTicks;
 		boolean loaded = TickEngineConfig.load();
 		ServerCoreCompat.refresh();
 		if (!loaded) {
@@ -653,6 +758,13 @@ public final class TickEngineCommand {
 		}
 		context.getSource().sendSuccess(() -> Component.literal("TickEngine config reloaded.")
 			.withStyle(ChatFormatting.GREEN), true);
+		if (!spreadBefore && TickEngineConfig.spreadEntityTicks) {
+			// Same as '/tickengine spread confirm': entities already loaded are spread now, not on their next load.
+			int moved = EntityThrottle.spreadLoadedEntities(context.getSource().getServer());
+			TickEngine.LOGGER.info("Tick spreading turned on by a config reload; {} loaded entities moved.", moved);
+			context.getSource().sendSuccess(() -> Component.literal("Tick spreading was turned on in the file; " + moved
+				+ " loaded entities were moved.").withStyle(ChatFormatting.GRAY), false);
+		}
 		String inconsistency = TickEngineConfig.checkConsistency();
 		if (inconsistency != null) {
 			context.getSource().sendSuccess(() -> Component.literal(inconsistency + " Auto-tuning will not relax until"

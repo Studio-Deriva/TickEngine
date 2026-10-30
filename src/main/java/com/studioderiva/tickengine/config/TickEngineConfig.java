@@ -3,6 +3,7 @@ package com.studioderiva.tickengine.config;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+//? if >=1.21.5
 import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
 import com.studioderiva.tickengine.TickEngine;
@@ -14,6 +15,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -139,12 +141,13 @@ public final class TickEngineConfig {
 			"How many entries '/tickengine top' prints per list. Range: 1-50.",
 			1, 50, () -> chatTopEntries, v -> chatTopEntries = v));
 		register(Option.string("output.reportDirectory",
-			"Folder for HTML reports, relative to the server folder. Must stay inside the server folder.",
+			"Folder for HTML profiler reports and '/tickengine report' files, relative to the server folder.\n"
+				+ "Must stay inside the server folder.",
 			() -> reportDirectory, v -> reportDirectory = v, TickEngineConfig::checkReportDirectory));
 		register(Option.integer("permissions.commandOpLevel",
 			"Operator level required for /tickengine when no permissions mod (e.g. LuckPerms) is installed.\n"
 				+ "With LuckPerms use the nodes tickengine.status, tickengine.top, tickengine.profile,\n"
-				+ "tickengine.config. Range: 0-4.",
+				+ "tickengine.config, tickengine.report. Range: 0-4.",
 			0, 4, () -> commandOpLevel, v -> commandOpLevel = v));
 		register(Option.bool("blockEntities.enabled",
 			"Block entity throttling: machines, hoppers, furnaces etc. (vanilla and modded) that are far\n"
@@ -343,6 +346,8 @@ public final class TickEngineConfig {
 	}
 
 	private static void register(Option<?> option) {
+		// The fields still hold their defaults here: the config file is read later, in load().
+		option.defaultText = option.format();
 		OPTIONS.put(option.key, option);
 	}
 
@@ -392,7 +397,12 @@ public final class TickEngineConfig {
 		if (Files.exists(FILE)) {
 			try (Reader reader = Files.newBufferedReader(FILE, StandardCharsets.UTF_8)) {
 				JsonReader json = new JsonReader(reader);
+				// Gson's Strictness arrived in 2.11 (Minecraft 1.21.4); the 1.21.2 jar also runs on 1.21.2-1.21.3.
+				//? if >=1.21.5 {
 				json.setStrictness(Strictness.LENIENT);
+				//?} else {
+				/*json.setLenient(true);
+				*///?}
 				JsonObject root = JsonParser.parseReader(json).getAsJsonObject();
 				for (Option<?> option : OPTIONS.values()) {
 					JsonElement value = find(root, option.key);
@@ -502,6 +512,8 @@ public final class TickEngineConfig {
 		private final Function<T, String> validator;
 		/** For options with risks: the command that changes it after a confirmation, or null. */
 		private String confirmCommand;
+		/** The value before any config file or command changed it. */
+		private String defaultText;
 
 		private Option(String key, String comment, Supplier<T> getter, Consumer<T> setter,
 			Function<String, T> parser, Function<T, String> validator) {
@@ -514,7 +526,7 @@ public final class TickEngineConfig {
 		}
 
 		static Option<Boolean> bool(String key, String comment, Supplier<Boolean> getter, Consumer<Boolean> setter) {
-			return new Option<>(key, comment, getter, setter, text -> switch (text.toLowerCase()) {
+			return new Option<>(key, comment, getter, setter, text -> switch (text.trim().toLowerCase(Locale.ROOT)) {
 				case "true", "on", "yes" -> true;
 				case "false", "off", "no" -> false;
 				default -> null;
@@ -550,6 +562,14 @@ public final class TickEngineConfig {
 
 		public String format() {
 			return String.valueOf(getter.get());
+		}
+
+		public String defaultText() {
+			return defaultText;
+		}
+
+		public boolean isDefault() {
+			return format().equals(defaultText);
 		}
 
 		String toJson() {

@@ -1,5 +1,6 @@
 package com.studioderiva.tickengine.throttle;
 
+import com.studioderiva.tickengine.compat.MinecraftCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.tuning.AutoTuner;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -68,7 +69,7 @@ public final class BlockEntityThrottle {
 				}
 			}
 		}
-		forcedChunks = level.getForceLoadedChunks();
+		forcedChunks = MinecraftCompat.forceLoadedChunks(level);
 	}
 
 	/** True when the block entity must not tick this game tick. */

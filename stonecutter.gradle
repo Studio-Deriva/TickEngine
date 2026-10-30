@@ -1,0 +1,6 @@
+plugins {
+	id 'dev.kikugie.stonecutter'
+}
+
+// The version the shared src/ is switched to. 1.21.11 is the one committed to git.
+stonecutter.active '1.21.11'

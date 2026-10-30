@@ -23,7 +23,12 @@ One idea per message, and check whether somebody already suggested it before pos
 
 ## Bugs
 
-Open a ticket on [our Discord](https://discord.gg/pQPWr7vfHu), with:
+The quickest way: run `/tickengine report` (general, or about one block entity, entity or mod) and click
+the link it gives you. It opens a GitHub issue with the versions, settings, rule, profiler numbers and
+mod list already filled in; you describe the problem and submit it. Attach the file it wrote to
+`tickengine/reports/` too. Nothing is sent without you submitting it.
+
+You can also open a ticket on [our Discord](https://discord.gg/pQPWr7vfHu), with:
 
 - the TickEngine version, the Minecraft/Fabric versions and the full mod list (especially Lithium,
   C2ME, ServerCore and any mod that adds machines or mobs),
@@ -37,8 +42,8 @@ Open a ticket on [our Discord](https://discord.gg/pQPWr7vfHu), with:
 ## Pull requests
 
 ```
-./gradlew build      # compiles the mod
-./gradlew runServer  # dev server in run/
+./gradlew build               # compiles and tests every Minecraft version
+./gradlew :1.21.11:runServer  # dev server in versions/1.21.11/run/
 ```
 
 House style:
@@ -50,7 +55,10 @@ House style:
 - The hot path (every block entity and entity tick) allocates nothing and does as little as
   possible; anything that can be computed once per tick or once per config change is.
 - Every behaviour change is an option in `config/tickengine.json5`, with a comment.
-- Mixin targets are checked against the decompiled 1.21.11 sources, not guessed.
+- Mixin targets are checked against the decompiled sources of every supported version, not guessed.
+- Code that differs between Minecraft versions goes in `compat/MinecraftCompat.java` behind Stonecutter
+  `//? if` comments where possible; run `./gradlew "Reset active project"` before committing so `src/`
+  stays in the 1.21.11 state.
 
 ## Licence
 

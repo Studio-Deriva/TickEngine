@@ -119,27 +119,38 @@ public final class ThrottleRules<V> {
 		return Collections.unmodifiableMap(dimensionRules);
 	}
 
+	/** The rule that applies to a type, and which of the rules above it came from. */
+	public record Match<V>(V value, String source) {
+	}
+
 	public V resolve(Identifier typeId, Identifier dimension, boolean useDimensionRules, V defaultValue) {
+		Match<V> match = explain(typeId, dimension, useDimensionRules);
+		return match == null ? defaultValue : match.value();
+	}
+
+	/** Same lookup as {@link #resolve}, but says which rule matched. Null when only the default applies. */
+	public Match<V> explain(Identifier typeId, Identifier dimension, boolean useDimensionRules) {
 		String typeKey = typeId.toString();
 		String modKey = typeId.getNamespace() + ":" + ALL;
-		Map<String, V> inDimension = useDimensionRules ? dimensionRules.get(dimension.toString()) : null;
+		String dimensionKey = dimension.toString();
+		Map<String, V> inDimension = useDimensionRules ? dimensionRules.get(dimensionKey) : null;
 		V value;
 		if (inDimension != null && (value = inDimension.get(typeKey)) != null) {
-			return value;
+			return new Match<>(value, "rule for " + typeKey + " in " + dimensionKey);
 		}
 		if ((value = rules.get(typeKey)) != null) {
-			return value;
+			return new Match<>(value, "rule for " + typeKey);
 		}
 		if (inDimension != null && (value = inDimension.get(modKey)) != null) {
-			return value;
+			return new Match<>(value, "rule for " + modKey + " in " + dimensionKey);
 		}
 		if ((value = rules.get(modKey)) != null) {
-			return value;
+			return new Match<>(value, "rule for " + modKey);
 		}
 		if (inDimension != null && (value = inDimension.get(ALL)) != null) {
-			return value;
+			return new Match<>(value, "rule for " + ALL + " in " + dimensionKey);
 		}
-		return defaultValue;
+		return null;
 	}
 
 	/** Adds or replaces a rule. Returns null on success, otherwise an error message. */

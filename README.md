@@ -1,6 +1,6 @@
 # TickEngine
 
-Server-side tick profiler and throttling for Fabric 1.21.11, by [Studio Deriva](https://discord.gg/pQPWr7vfHu).
+Server-side tick profiler and throttling for Fabric 1.21 to 1.21.11, by [Studio Deriva](https://discord.gg/pQPWr7vfHu).
 
 TickEngine shows where your server's tick time goes — per mod, per block entity type, per entity
 type — and makes the things far from every player cost less: machines, hoppers and furnaces tick less
@@ -49,13 +49,33 @@ ServerCore, not instead of them.
 
 | | |
 |---|---|
-| Minecraft | 1.21.11 |
+| Minecraft | 1.21 to 1.21.11, one jar per range (below) |
 | Loader | Fabric 0.19.5+ |
 | Java | 21 |
 | Required | Fabric API |
 | Optional | LuckPerms (or any fabric-permissions-api provider) for permission nodes |
 
 Install it on the **server only**. Players don't need it, and it does nothing on a client.
+
+### Which jar
+
+Minecraft changed its code several times during 1.21.x, so there is one jar per range. Pick the one
+that covers your server's version; the others refuse to load on it.
+
+| Server version | Jar |
+|---|---|
+| 1.21, 1.21.1 | `tickengine-<version>+1.21.1.jar` |
+| 1.21.2 to 1.21.4 | `tickengine-<version>+1.21.2.jar` |
+| 1.21.5 | `tickengine-<version>+1.21.5.jar` |
+| 1.21.6 to 1.21.8 | `tickengine-<version>+1.21.6.jar` |
+| 1.21.9, 1.21.10 | `tickengine-<version>+1.21.9.jar` |
+| 1.21.11 | `tickengine-<version>+1.21.11.jar` |
+
+Every jar has the same features and config. Each one bundles the fabric-permissions-api build made for
+its range. The tests in "How this mod was checked" were run on 1.21.11 unless they say otherwise; on
+1.21.1 the dev server was checked too (all mixins applied, throttling, profiler and commands working).
+The other jars are built and unit-tested, and their mixin targets checked against each version's
+bytecode, but not yet run on a server.
 
 ## Getting started
 
@@ -231,12 +251,28 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine spread` | Tick spreading: state, what it does, gain and risk |
 | `/tickengine spread enable` / `confirm <phrase>` / `disable` | Turn tick spreading on (after reading the warning and typing the phrase) or off |
 | `/tickengine spread exclude add\|remove <target>` / `list` | Types or mods that tick spreading never moves (`minecraft:villager`, `somemod:*`) |
+| `/tickengine report` | Report a problem: click what it is about (general, a block entity, an entity, a mod), then see the next section |
+| `/tickengine report general\|blockentity <type>\|entity <type>\|mod <mod id>` | Collect a diagnostic report and get a link that opens it as a GitHub issue (Tab completes the type or mod) |
+
+### Reporting a problem
+
+`/tickengine report entity minecraft:villager` (or `blockentity`, `mod`, `general`) collects what we need
+to look at a problem: versions, the settings you changed, the rule that applies to that target and
+why, profiler numbers for it, the state of the throttles and auto-tuning, and the mod list. It gives you
+a link: click it, your browser opens a GitHub issue with all of that filled in, you describe what is
+going wrong and press Submit. A file with the full report (the link has to stay short and can leave out
+part of the mod list) is written to `tickengine/reports/` to attach to the issue.
+
+TickEngine sends nothing itself, so you can read everything before it is posted. The report has no
+player names, IP addresses or coordinates; the only path in it is the `output.reportDirectory` setting,
+relative to the server folder. From the server console the command prints the address of the new-issue
+page and the file instead of a clickable link; there the file is the whole report, so attach or paste it.
 
 ## Permissions
 
 Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
 With LuckPerms (tested with 5.5.21) or any fabric-permissions-api provider, use these nodes:
-`tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
+`tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, `tickengine.report`, and
 `tickengine.notify` for admin notices (auto-tuning changes, the ServerCore notices below).
 
 ## Compatibility
@@ -250,7 +286,7 @@ With LuckPerms (tested with 5.5.21) or any fabric-permissions-api provider, use 
     TickEngine's auto-tuning only adjusts its own throttles.
 
   Admins get a notice on join and every `notices.intervalMinutes` (30) while either applies.
-- **C2ME**: tested with 0.4.0-alpha.0.28 on Java 25 (every C2ME build for 1.21.11 needs Java 25),
+- **C2ME**: tested on 1.21.11 with 0.4.0-alpha.0.28 on Java 25 (every C2ME build for 1.21.11 needs Java 25),
   together with Lithium and FerriteCore: no conflicts, new chunks generated while throttling, throttled
   entities kept across chunk unloads and reloads. TickEngine is built for Java 21 and runs on Java 25.
 - **Modded block entities and entities** are throttled like vanilla ones. If a mod's machine or mob
@@ -259,12 +295,21 @@ With LuckPerms (tested with 5.5.21) or any fabric-permissions-api provider, use 
 ## Building from source
 
 ```
-./gradlew build          # jar in build/libs/ (also runs the tests)
-./gradlew test           # unit tests only
-./gradlew runServer      # dev server in run/
+./gradlew build                  # all six jars, in versions/<minecraft>/build/libs/ (also runs the tests)
+./gradlew :1.21.1:build          # one jar
+./gradlew test                   # unit tests only, every version
+./gradlew :1.21.11:runServer     # dev server in versions/1.21.11/run/
 ```
 
 Java 21 or newer, and a first run with network access to fetch the dependencies.
+
+The versions are handled by [Stonecutter](https://stonecutter.kikugie.dev/): one source tree in
+`src/`, with `//? if` comments where Minecraft versions differ (mostly in
+`compat/MinecraftCompat.java`), and renames such as `Identifier`/`ResourceLocation` done by
+replacements in `build.gradle`. Each version's Fabric API and fabric-permissions-api versions are in
+`versions/<minecraft>/gradle.properties`. `src/` is kept in the 1.21.11 state; to edit it as another
+version, run `./gradlew "Set active project to 1.21.1"`, and `./gradlew "Reset active project"` before
+committing.
 
 ## How this mod was checked
 
@@ -295,7 +340,8 @@ Checked after the audit:
 
 ## Contributing
 
-Ideas, bug reports and pull requests are all welcome. Found a bug? Open a ticket on
+Ideas, bug reports and pull requests are all welcome. Found a bug? Run `/tickengine report` in
+game or on the console and open the GitHub issue it prepares, or open a ticket on
 [our Discord](https://discord.gg/pQPWr7vfHu). If an idea of yours ships, your name goes in the
 credits and in the release notes. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

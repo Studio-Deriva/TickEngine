@@ -1,5 +1,6 @@
 package com.studioderiva.tickengine.throttle;
 
+import com.studioderiva.tickengine.compat.MinecraftCompat;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
@@ -116,7 +117,7 @@ public final class EntityThrottle {
 				}
 			}
 		}
-		forcedChunks = level.getForceLoadedChunks();
+		forcedChunks = MinecraftCompat.forceLoadedChunks(level);
 	}
 
 	/** Decides the mode for a non-passenger entity that is about to tick. */

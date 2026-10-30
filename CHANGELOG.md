@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.5
 
+- **Minecraft 1.21 to 1.21.11.** TickEngine now ships six jars, one per range: 1.21-1.21.1,
+  1.21.2-1.21.4, 1.21.5, 1.21.6-1.21.8, 1.21.9-1.21.10 and 1.21.11 (the jar name ends in the first
+  version of its range, for example `+1.21.2`). Same features and config in all of them; each bundles
+  the fabric-permissions-api build for its range. Checked on a 1.21.1 dev server; the 1.21.2, 1.21.5,
+  1.21.6 and 1.21.9 jars are built, unit-tested and their mixin targets checked, but not yet run on a
+  server.
 - Fixed: turning tick spreading on skipped the entities that were exactly at the spreading tick at that
   moment; they are moved too now.
 - `/tickengine config set entities.spreadTicks false` now turns spreading off. Turning it on still goes
@@ -12,6 +18,14 @@
   tick in two however heavy the load. `autoTuning.tuneForcedChunks` turns the step off,
   `autoTuning.maxForcedChunkInterval` (4) sets how far it goes; a limit of 1 is never raised. The default
   limit stays 2. One more auto-tuning level is available as a result.
+- New `/tickengine report`: collects a diagnostic report for a problem (general, or about one block
+  entity type, entity type or mod) and gives a link that opens it as a GitHub issue to review and
+  submit: versions, the settings changed from the defaults, the rule that applies to the target and
+  where it comes from, profiler numbers, throttle and auto-tuning state, and the mod list. The full
+  report is written to `tickengine/reports/diagnostic-<time>.txt` to attach, since the link has to stay
+  short. TickEngine sends nothing itself, and the report has no player names, addresses or coordinates;
+  the only path in it is the `output.reportDirectory` setting, relative to the server folder. New
+  permission node `tickengine.report`.
 - A mini-audit of every change since 1.0.0-beta.1 is in HOW_WE_VERIFIED_AND_FIXED_THE_BUGS.txt (part 6).
 
 ## 1.0.0-beta.4

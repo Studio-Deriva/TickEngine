@@ -1,19 +1,16 @@
 package com.studioderiva.tickengine.notice;
 
 import com.studioderiva.tickengine.TickEngine;
+import com.studioderiva.tickengine.compat.MinecraftCompat;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import java.util.ArrayList;
 import java.util.List;
-import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.ChatFormatting;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.PermissionLevel;
 
 /**
  * Tells admins about configuration problems: when they join, then every
@@ -22,6 +19,7 @@ import net.minecraft.server.permissions.PermissionLevel;
  */
 public final class AdminNotices {
 	private static final String PERMISSION = TickEngine.MOD_ID + ".notify";
+	private static final String CONFIG_PERMISSION = TickEngine.MOD_ID + ".config";
 
 	private static long ticksUntilRepeat;
 	private static boolean conflictLogged;
@@ -105,17 +103,21 @@ public final class AdminNotices {
 	}
 
 	private static boolean isAdmin(ServerPlayer player) {
-		return Permissions.check(player, PERMISSION, PermissionLevel.byId(TickEngineConfig.commandOpLevel));
+		return MinecraftCompat.check(player, PERMISSION, TickEngineConfig.commandOpLevel);
 	}
 
 	private static void send(ServerPlayer player, List<Component> problems) {
+		// The link runs a config command: players with only tickengine.notify could not use it.
+		boolean canHide = MinecraftCompat.check(player, CONFIG_PERMISSION, TickEngineConfig.commandOpLevel);
 		for (Component problem : problems) {
-			MutableComponent hide = Component.literal(" [hide notices]").withStyle(style -> style
-				.withColor(ChatFormatting.GRAY)
-				.withClickEvent(new ClickEvent.SuggestCommand("/tickengine config set notices.enabled false"))
-				.withHoverEvent(new HoverEvent.ShowText(Component.literal("Turn these notices off"))));
-			player.sendSystemMessage(Component.literal("[TickEngine] ").withStyle(ChatFormatting.DARK_AQUA)
-				.append(problem).append(hide));
+			MutableComponent line = Component.literal("[TickEngine] ").withStyle(ChatFormatting.DARK_AQUA).append(problem);
+			if (canHide) {
+				line.append(Component.literal(" [hide notices]").withStyle(style -> style
+					.withColor(ChatFormatting.GRAY)
+					.withClickEvent(MinecraftCompat.suggestCommand("/tickengine config set notices.enabled false"))
+					.withHoverEvent(MinecraftCompat.showText(Component.literal("Turn these notices off")))));
+			}
+			player.sendSystemMessage(line);
 		}
 	}
 

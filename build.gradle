@@ -2,6 +2,24 @@ plugins {
 	id 'fabric-loom' version "${loom_version}"
 }
 
+// Stonecutter runs this script once per node in versions/; sc.current.version is that node's Minecraft version.
+def minecraftVersion = sc.current.version
+version = "${project.mod_version}+${minecraftVersion}"
+group = project.group
+
+// Minecraft renames used all over the code, rewritten in the sources of nodes older than 1.21.11.
+// Smaller differences are //? if comments, mostly in compat/MinecraftCompat.java.
+stonecutter {
+	def beforeIdentifier = sc.current.parsed.matches('<1.21.11')
+	replacements.regex(beforeIdentifier) {
+		replace '\\bIdentifier\\b', 'ResourceLocation', '\\bResourceLocation\\b', 'Identifier'
+	}
+	replacements.string(beforeIdentifier) {
+		replace '.identifier()', '.location()'
+		replace 'net.minecraft.util.Util;', 'net.minecraft.Util;'
+	}
+}
+
 repositories {
 	mavenCentral()
 }
@@ -11,14 +29,14 @@ base {
 }
 
 dependencies {
-	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	minecraft "com.mojang:minecraft:${minecraftVersion}"
 	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${property('deps.fabric_api')}"
 
 	// Bundled (~12 KB): permission nodes work with LuckPerms when present,
 	// and fall back to vanilla operator levels otherwise.
-	include(modImplementation("me.lucko:fabric-permissions-api:${project.fabric_permissions_api_version}"))
+	include(modImplementation("me.lucko:fabric-permissions-api:${property('deps.fabric_permissions_api')}"))
 
 	// Runs JUnit tests inside Fabric Loader, so mod and Minecraft classes load as in the game.
 	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
@@ -30,6 +48,7 @@ test {
 
 loom {
 	// TickEngine is server-side only: run a dedicated server for development.
+	// Each node keeps its own world in versions/<minecraft>/run, since worlds don't load on older versions.
 	runs {
 		server {
 			runDir "run"
@@ -43,10 +62,12 @@ loom {
 
 processResources {
 	def version = project.version
+	def minecraftRange = project.property('mod.minecraft_range')
 	inputs.property "version", version
+	inputs.property "minecraftRange", minecraftRange
 
 	filesMatching("fabric.mod.json") {
-		expand "version": version
+		expand "version": version, "minecraft_range": minecraftRange
 	}
 }
 
@@ -61,10 +82,10 @@ java {
 }
 
 jar {
-	def projectName = project.name
+	def projectName = project.archives_base_name
 	inputs.property "projectName", projectName
 
-	from("LICENSE") {
+	from(rootProject.file("LICENSE")) {
 		rename { "${it}_$projectName" }
 	}
 }
