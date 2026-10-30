@@ -81,6 +81,26 @@ send 'tickengine rules entities set-in minecraft:the_nether 2 2 minecraft:zombie
 send 'tickengine rules entities list' 1
 send 'tickengine rules entities remove-in minecraft:the_nether minecraft:zombie' 1
 send 'tickengine spread' 1
+# Emergency mode by hand: auto-tuning jumps to the top and comes back.
+send 'tickengine emergency start' 2
+send 'tickengine emergency' 1
+send 'tickengine emergency stop' 1
+# Stacking: three cows on one spot become one stack; /damage takes one mob, /kill the rest.
+send 'kill @e[type=minecraft:cow]' 1
+send 'tickengine stacking mode always' 1
+send 'tickengine stacking confirm I understand the risks' 1
+# On a platform high up: at y 80 some dev worlds have terrain, and cows inside it suffocate.
+send 'fill 9 300 9 15 300 15 minecraft:stone' 0
+send 'fill 9 301 9 15 303 15 minecraft:air' 0
+send 'summon minecraft:cow 12 301 12' 0
+send 'summon minecraft:cow 12 301 12' 0
+send 'summon minecraft:cow 12 301 12' 6
+send 'tickengine stacking' 1
+send 'data get entity @e[type=minecraft:cow,tag=tickengine.stack.3,limit=1] CustomName' 1
+send 'damage @e[type=minecraft:cow,tag=tickengine.stack.3,limit=1] 100 minecraft:generic' 2
+send 'data get entity @e[type=minecraft:cow,tag=tickengine.stack.2,limit=1] CustomName' 1
+send 'kill @e[type=minecraft:cow]' 1
+send 'tickengine stacking mode off' 1
 send 'tickengine status' 2
 stop_server
 trap - EXIT
@@ -94,9 +114,9 @@ check() { # description, pattern that must be in the log
 		failures=$((failures + 1))
 	fi
 }
-check_absent() { # description, pattern that must not be in the log
+check_absent() { # description, pattern that must not be in the log, optional pattern of lines allowed anyway
 	local found
-	found="$(grep -nE "$2" "$log" | head -3 || true)"
+	found="$(grep -nE "$2" "$log" | grep -vE "${3:-^$}" | head -3 || true)"
 	if [ -z "$found" ]; then
 		echo "PASS $1"
 	else
@@ -106,7 +126,7 @@ check_absent() { # description, pattern that must not be in the log
 	fi
 }
 
-check "loads the $node jar" "tickengine 1\.0\.0[^ ]*\+$node"
+check "loads the $node jar" "tickengine [0-9]+\.[0-9]+\.[0-9]+[^ ]*\+$node"
 check "TickEngine initializes" 'TickEngine initialized'
 check "block entity throttling skips ticks (Level/BoundTickingBlockEntity mixins)" 'Block entity throttle: on, skipped [1-9]'
 check "entity throttling gives minimal ticks (ServerLevel mixin, accessors)" 'last second: [0-9]+ full ticks, [0-9]+ without AI, [1-9][0-9]* minimal'
@@ -118,11 +138,15 @@ check "auto-tuning status" 'Force-loaded chunks: never slower than'
 check "default entity rules (Identifier/ResourceLocation)" 'minecraft:warden: AI never throttled'
 check "per-dimension rule (ResourceKey identifier/location)" 'Rule saved: minecraft:zombie: .* in minecraft:the_nether'
 check "tick spreading command" 'Tick spreading \(experimental\)'
+check "emergency mode starts and raises auto-tuning" 'Auto-tuning level 0 -> [1-9][0-9]* \(emergency mode\)'
+check "emergency mode ends and auto-tuning comes back" 'Auto-tuning level [1-9][0-9]* -> 0 \(emergency mode over\)'
+check "entity stacking merges cows (NBT save, tags, name)" 'Cow x3 has the following entity data'
+check "a stack loses one mob when it dies (die mixin, NBT load)" 'Cow x2 has the following entity data'
 check "server stops cleanly" 'Stopping server|All dimensions are saved'
 check_absent "no mixin errors" 'InvalidInjectionException|InjectionError|MixinApplyError|Mixin apply .*failed|Critical injection failure|@Shadow field .* was not located'
 check_absent "no missing classes or members" 'NoSuchMethodError|NoSuchFieldError|NoClassDefFoundError|ClassNotFoundException: (net\.minecraft|com\.studioderiva|me\.lucko)'
 check_absent "no exceptions in the server tick" 'Exception in server tick|Encountered an unexpected exception|---- Minecraft Crash Report ----'
-check_absent "no TickEngine errors or warnings" '\((TickEngine)\).*(ERROR|WARN)|/(ERROR|WARN)\] \(TickEngine\)'
+check_absent "no TickEngine errors or warnings" '\((TickEngine)\).*(ERROR|WARN)|/(ERROR|WARN)\] \(TickEngine\)' 'Emergency mode ON'
 check_absent "no command errors" 'Unknown or incomplete command|An unexpected error occurred trying to execute that command'
 
 echo

@@ -3,6 +3,7 @@ package com.studioderiva.tickengine.throttle;
 import com.studioderiva.tickengine.compat.MinecraftCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.tuning.AutoTuner;
+import com.studioderiva.tickengine.tuning.EmergencyMode;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
@@ -85,7 +86,7 @@ public final class BlockEntityThrottle {
 		}
 		int interval = interval(blockEntity.getType());
 		if (interval > 1 && forcedChunks.contains(chunk)) {
-			interval = Math.min(interval, AutoTuner.values().blockEntityForcedMax());
+			interval = Math.min(interval, EmergencyMode.adjustInterval(AutoTuner.values().blockEntityForcedMax()));
 		}
 		if (interval <= 1) {
 			tickedNow++;
@@ -117,6 +118,8 @@ public final class BlockEntityThrottle {
 			interval = id == null ? 1 : TickEngineConfig.BLOCK_ENTITY_RULES.resolve(id,
 				preparedLevel.dimension().identifier(), TickEngineConfig.dimensionRulesEnabled,
 				AutoTuner.values().blockEntityInterval());
+			// The cache is rebuilt when emergency mode starts or ends (it bumps the config version).
+			interval = EmergencyMode.adjustInterval(interval);
 			cache.put(type, interval);
 		}
 		return interval;

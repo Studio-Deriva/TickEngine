@@ -111,6 +111,31 @@ public final class TickEngineConfig {
 	public static int minViewDistance = 6;
 	public static boolean notifyTuningChanges = true;
 
+	// --- emergency mode ---
+	public static boolean emergencyEnabled = false;
+	public static int emergencyTriggerMspt = 150;
+	public static int emergencyTriggerSeconds = 30;
+	public static int emergencyMemoryPercent = 90;
+	public static int emergencyExitMspt = 60;
+	public static int emergencyExitSeconds = 60;
+	public static int emergencyInterval = 20;
+	public static boolean emergencyPauseSpawning = true;
+	public static boolean emergencySaveOnEnter = true;
+
+	// --- entity stacking ---
+	public static final String STACKING_OFF = "off";
+	public static final String STACKING_EMERGENCY = "emergency";
+	public static final String STACKING_AUTO_TUNING = "autoTuning";
+	public static final String STACKING_ALWAYS = "always";
+	public static String stackingMode = STACKING_OFF;
+	public static int stackMaxSize = 10;
+	public static int stackAreaBlocks = 5;
+	public static boolean stackAlwaysShowCount = false;
+	public static final TargetList STACK_EXCLUDE = new TargetList("exclude", new String[] {
+		"Entity types or whole mods that are never stacked: [\"minecraft:villager\", \"somemod:*\"].",
+		"Also never stacked: named, tamed or leashed mobs, babies, animals in love, mobs in combat, riders",
+		"and their mounts, bosses. Change live with '/tickengine stacking exclude'."});
+
 	// --- compatibility and notices ---
 	public static boolean disableEntityThrottleWithServerCore = true;
 	public static boolean noticesEnabled = true;
@@ -318,6 +343,69 @@ public final class TickEngineConfig {
 			"Tell admins in chat on every level change (always logged). Also needs notices.enabled.",
 			() -> notifyTuningChanges, v -> notifyTuningChanges = v));
 
+		register(Option.bool("emergency.enabled",
+			"Emergency mode: when the server is about to fall over (average MSPT above 'triggerMspt' for\n"
+				+ "'triggerSeconds', or memory almost full) it throttles as hard as it can until the load is gone:\n"
+				+ "auto-tuning jumps to its highest level, far entities and block entities run once every\n"
+				+ "'interval' ticks, natural mob spawning pauses, and with stacking.mode 'emergency' or higher\n"
+				+ "entities are stacked. It cannot help with one single tick that freezes the server.",
+			() -> emergencyEnabled, v -> emergencyEnabled = v));
+		register(Option.integer("emergency.triggerMspt",
+			"Enter when the average MSPT stays above this for 'triggerSeconds' (150 = about 6.7 TPS).\n"
+				+ "Range: 50-2000.",
+			50, 2000, () -> emergencyTriggerMspt, v -> emergencyTriggerMspt = v));
+		register(Option.integer("emergency.triggerSeconds",
+			"Seconds (real time) the MSPT or memory must stay critical before entering. Range: 5-600.",
+			5, 600, () -> emergencyTriggerSeconds, v -> emergencyTriggerSeconds = v));
+		register(Option.integer("emergency.memoryPercent",
+			"Also enter when the old generation of the Java heap is still this full after a garbage\n"
+				+ "collection, which happens close to an out-of-memory crash. 0 = do not look at memory.\n"
+				+ "Range: 0 or 50-99.",
+			0, 99, () -> emergencyMemoryPercent, v -> emergencyMemoryPercent = v));
+		register(Option.integer("emergency.exitMspt",
+			"Leave when the average MSPT stays below this for 'exitSeconds' (and memory is fine).\n"
+				+ "Must be below triggerMspt. Range: 10-1999.",
+			10, 1999, () -> emergencyExitMspt, v -> emergencyExitMspt = v));
+		register(Option.integer("emergency.exitSeconds",
+			"Seconds (real time) the load must stay low before leaving. Range: 5-3600.",
+			5, 3600, () -> emergencyExitSeconds, v -> emergencyExitSeconds = v));
+		register(Option.integer("emergency.interval",
+			"During an emergency, entities and block entities away from players tick at most once every N ticks\n"
+				+ "(rules with 1, like pistons, Elder Guardians and Wardens, are still never throttled).\n"
+				+ "Prefer 10, 20, 40 or 80. Range: 2-100.",
+			2, 100, () -> emergencyInterval, v -> emergencyInterval = v));
+		register(Option.bool("emergency.pauseMobSpawning",
+			"Pause natural mob spawning during an emergency. Spawners, raids and commands still work.",
+			() -> emergencyPauseSpawning, v -> emergencyPauseSpawning = v));
+		register(Option.bool("emergency.saveOnEnter",
+			"Save the world when the emergency starts (at most once every 10 minutes), so a crash that follows\n"
+				+ "loses less. Saving takes a moment of its own on big worlds.",
+			() -> emergencySaveOnEnter, v -> emergencySaveOnEnter = v));
+
+		register(Option.choice("stacking.mode",
+			"EXPERIMENTAL, off by default. Entity stacking merges mobs of the same kind standing close together\n"
+				+ "into one mob that counts for several (up to 'maxSize'): one mob ticks instead of ten. Killing a\n"
+				+ "stack kills one mob at a time, each with its normal loot and XP, so farms give the same.\n"
+				+ "Using a stack (feeding, shearing, a name tag, a lead...) separates the mob you clicked.\n"
+				+ "When:  off | emergency (only during emergency mode) | autoTuning (also as the last\n"
+				+ "auto-tuning level) | always. Only '/tickengine stacking mode' can turn it on, after explaining the\n"
+				+ "risks; '/tickengine config set' can only set it to off. Before removing TickEngine, run\n"
+				+ "'/tickengine stacking unstack', or each stack stays one single mob.",
+			new String[] {STACKING_OFF, STACKING_EMERGENCY, STACKING_AUTO_TUNING, STACKING_ALWAYS},
+			() -> stackingMode, v -> stackingMode = v).confirmedBy("/tickengine stacking mode", STACKING_OFF));
+		register(Option.integer("stacking.maxSize",
+			"Most mobs one stack holds. Range: 2-100.",
+			2, 100, () -> stackMaxSize, v -> stackMaxSize = v));
+		register(Option.integer("stacking.areaBlocks",
+			"Mobs stack with the others of their kind inside the same cube of this many blocks per side (the\n"
+				+ "world is cut in a grid of cubes, moved by half a cube every other second so mobs on an edge\n"
+				+ "meet too). Bigger stacks more, but pulls mobs from further away into one place. Range: 2-32.",
+			2, 32, () -> stackAreaBlocks, v -> stackAreaBlocks = v));
+		register(Option.bool("stacking.alwaysShowCount",
+			"Show the count above stacks all the time (\"Zombie x7\"). When false it shows only when a player\n"
+				+ "looks at the mob up close, like a name tag.",
+			() -> stackAlwaysShowCount, v -> stackAlwaysShowCount = v));
+
 		register(Option.bool("compatibility.disableEntityThrottleWithServerCore",
 			"Turn off TickEngine's entity throttling while ServerCore's entity activation range is on, so\n"
 				+ "entities are not throttled twice. The profiler and block entity throttling keep running.",
@@ -340,6 +428,9 @@ public final class TickEngineConfig {
 		// turn never reaches for most ids.
 		ENTITY_RULES.set("minecraft:elder_guardian", new ThrottleRules.EntityIntervals(1, 1), null);
 		ENTITY_RULES.set("minecraft:warden", new ThrottleRules.EntityIntervals(1, 1), null);
+		// Their trades and workplaces are stored per villager.
+		STACK_EXCLUDE.add("minecraft:villager");
+		STACK_EXCLUDE.add("minecraft:wandering_trader");
 	}
 
 	private TickEngineConfig() {
@@ -383,7 +474,14 @@ public final class TickEngineConfig {
 	public static String checkConsistency() {
 		if (lowerBelowMspt >= raiseAboveMspt) {
 			return "autoTuning.lowerBelowMspt (" + lowerBelowMspt + ") must be below autoTuning.raiseAboveMspt ("
-				+ raiseAboveMspt + ").";
+				+ raiseAboveMspt + "). Auto-tuning will not relax until this is fixed.";
+		}
+		if (emergencyExitMspt >= emergencyTriggerMspt) {
+			return "emergency.exitMspt (" + emergencyExitMspt + ") must be below emergency.triggerMspt ("
+				+ emergencyTriggerMspt + "). Until this is fixed, emergency mode ends below triggerMspt.";
+		}
+		if (emergencyMemoryPercent > 0 && emergencyMemoryPercent < 50) {
+			return "emergency.memoryPercent must be 0 (off) or between 50 and 99.";
 		}
 		return null;
 	}
@@ -422,6 +520,10 @@ public final class TickEngineConfig {
 					ENTITY_RULES.read(entities.getAsJsonObject());
 					SPREAD_EXCLUDE.read(entities.getAsJsonObject());
 				}
+				JsonElement stacking = root.get("stacking");
+				if (stacking != null && stacking.isJsonObject()) {
+					STACK_EXCLUDE.read(stacking.getAsJsonObject());
+				}
 			} catch (Exception e) {
 				TickEngine.LOGGER.error("Could not read {}: the file was NOT changed and the settings already in use (defaults at startup)"
 					+ " stay. Fix the error and run '/tickengine config reload'.", FILE, e);
@@ -431,7 +533,7 @@ public final class TickEngineConfig {
 		}
 		String inconsistency = checkConsistency();
 		if (inconsistency != null) {
-			TickEngine.LOGGER.warn("Config: {} Auto-tuning will not relax until this is fixed.", inconsistency);
+			TickEngine.LOGGER.warn("Config: {}", inconsistency);
 		}
 		version++;
 		save();
@@ -489,6 +591,9 @@ public final class TickEngineConfig {
 			ENTITY_RULES.write(out);
 			out.append(",\n");
 			SPREAD_EXCLUDE.write(out);
+		} else if (section.equals("stacking")) {
+			out.append(",\n");
+			STACK_EXCLUDE.write(out);
 		}
 	}
 
@@ -512,6 +617,8 @@ public final class TickEngineConfig {
 		private final Function<T, String> validator;
 		/** For options with risks: the command that changes it after a confirmation, or null. */
 		private String confirmCommand;
+		/** For options with risks: the one value '/tickengine config set' may still set. */
+		private String safeValue = "false";
 		/** The value before any config file or command changed it. */
 		private String defaultText;
 
@@ -550,14 +657,37 @@ public final class TickEngineConfig {
 				value -> value.isBlank() ? "must not be empty." : validator.apply(value));
 		}
 
+		/** One of {@code values}, matched ignoring case and stored as written there. */
+		static Option<String> choice(String key, String comment, String[] values, Supplier<String> getter,
+			Consumer<String> setter) {
+			return new Option<>(key, comment, getter, setter, text -> {
+				for (String value : values) {
+					if (value.equalsIgnoreCase(text.trim())) {
+						return value;
+					}
+				}
+				return null;
+			}, value -> null);
+		}
+
 		Option<T> confirmedBy(String command) {
 			confirmCommand = command;
 			return this;
 		}
 
+		Option<T> confirmedBy(String command, String safe) {
+			safeValue = safe;
+			return confirmedBy(command);
+		}
+
 		/** The command to use instead of '/tickengine config set', or null when config set may change it. */
 		public String confirmCommand() {
 			return confirmCommand;
+		}
+
+		/** The value '/tickengine config set' may set on an option that needs a confirmation. */
+		public String safeValue() {
+			return safeValue;
 		}
 
 		public String format() {

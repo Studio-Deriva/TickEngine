@@ -17,9 +17,11 @@ import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.report.DiagnosticReport;
 import com.studioderiva.tickengine.report.HtmlReport;
+import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import com.studioderiva.tickengine.tuning.AutoTuner;
+import com.studioderiva.tickengine.tuning.EmergencyMode;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +57,9 @@ import net.minecraft.server.level.ServerLevel;
  * /tickengine tuning status | pause | resume | level &lt;n&gt;
  * /tickengine spread [enable | confirm &lt;phrase&gt; | disable]
  * /tickengine spread exclude list | add &lt;target&gt; | remove &lt;target&gt;
+ * /tickengine emergency [enable | disable | start | stop]
+ * /tickengine stacking [mode &lt;mode&gt; | confirm &lt;phrase&gt; | unstack]
+ * /tickengine stacking exclude list | add &lt;target&gt; | remove &lt;target&gt;
  * /tickengine report [general | blockentity &lt;type&gt; | entity &lt;type&gt; | mod &lt;mod id&gt;]
  * </pre>
  *
@@ -132,6 +137,36 @@ public final class TickEngineCommand {
 							.suggests((context, builder) -> SharedSuggestionProvider.suggest(
 								TickEngineConfig.SPREAD_EXCLUDE.targets(), builder))
 							.executes(TickEngineCommand::spreadExcludeRemove)))))
+			.then(Commands.literal("emergency")
+				.requires(permission("config"))
+				.executes(TickEngineCommand::emergencyStatus)
+				.then(Commands.literal("enable").executes(context -> emergencySet(context, true)))
+				.then(Commands.literal("disable").executes(context -> emergencySet(context, false)))
+				.then(Commands.literal("start").executes(TickEngineCommand::emergencyStart))
+				.then(Commands.literal("stop").executes(TickEngineCommand::emergencyStop)))
+			.then(Commands.literal("stacking")
+				.requires(permission("config"))
+				.executes(TickEngineCommand::stackingStatus)
+				.then(Commands.literal("mode")
+					.then(Commands.argument("mode", StringArgumentType.word())
+						.suggests((context, builder) -> SharedSuggestionProvider.suggest(Stream.of(TickEngineConfig.STACKING_OFF,
+							TickEngineConfig.STACKING_EMERGENCY, TickEngineConfig.STACKING_AUTO_TUNING, TickEngineConfig.STACKING_ALWAYS),
+							builder))
+						.executes(TickEngineCommand::stackingMode)))
+				.then(Commands.literal("confirm")
+					.then(Commands.argument("phrase", StringArgumentType.greedyString())
+						.executes(TickEngineCommand::stackingConfirm)))
+				.then(Commands.literal("unstack").executes(TickEngineCommand::stackingUnstack))
+				.then(Commands.literal("exclude")
+					.then(Commands.literal("list").executes(TickEngineCommand::stackExcludeList))
+					.then(Commands.literal("add")
+						.then(targetArgument(BuiltInRegistries.ENTITY_TYPE.keySet(), false)
+							.executes(TickEngineCommand::stackExcludeAdd)))
+					.then(Commands.literal("remove")
+						.then(Commands.argument("target", StringArgumentType.greedyString())
+							.suggests((context, builder) -> SharedSuggestionProvider.suggest(
+								TickEngineConfig.STACK_EXCLUDE.targets(), builder))
+							.executes(TickEngineCommand::stackExcludeRemove)))))
 			.then(Commands.literal("report")
 				.requires(permission("report"))
 				.executes(TickEngineCommand::reportMenu)
@@ -202,6 +237,12 @@ public final class TickEngineCommand {
 		}
 		source.sendSuccess(() -> line("Auto-tuning", tuningSummary(server),
 			TickEngineConfig.autoTuning ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+		source.sendSuccess(() -> line("Emergency mode", emergencySummary(), EmergencyMode.isActive() ? ChatFormatting.RED
+			: TickEngineConfig.emergencyEnabled ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		if (!TickEngineConfig.stackingMode.equals(TickEngineConfig.STACKING_OFF) || EntityStacker.loadedStacks(server)[0] > 0) {
+			source.sendSuccess(() -> line("Entity stacking", stackingSummary(server), EntityStacker.isActive()
+				? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		}
 		if (ServerCoreCompat.installed()) {
 			source.sendSuccess(() -> line("ServerCore", "installed, activation range "
 				+ onOff(ServerCoreCompat.activationRangeEnabled()) + ", dynamic settings "
@@ -419,6 +460,263 @@ public final class TickEngineCommand {
 		TickEngineConfig.changed();
 		source.sendSuccess(() -> Component.literal("No longer excluded from tick spreading: " + target
 			+ ". Its entities are spread from their next load.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	// --- emergency ---
+
+	/** One-line emergency mode state. */
+	public static String emergencySummary() {
+		if (EmergencyMode.isActive()) {
+			return "ACTIVE for " + EmergencyMode.activeSeconds() + " s (" + EmergencyMode.reason() + ")";
+		}
+		if (!TickEngineConfig.emergencyEnabled) {
+			return "off";
+		}
+		long critical = EmergencyMode.criticalSeconds();
+		return "ready, enters above " + TickEngineConfig.emergencyTriggerMspt + " ms for " + TickEngineConfig.emergencyTriggerSeconds
+			+ " s" + (critical >= 0 ? " (critical for " + critical + " s now)" : "");
+	}
+
+	private static int emergencyStatus(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Emergency mode"), false);
+		source.sendSuccess(() -> line("State", emergencySummary(), EmergencyMode.isActive() ? ChatFormatting.RED
+			: TickEngineConfig.emergencyEnabled ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		int memory = EmergencyMode.oldGenerationPercent();
+		source.sendSuccess(() -> line("Load", "last 20 ticks " + format(EmergencyMode.lastMspt()) + " ms, old generation "
+			+ (memory < 0 ? "not reported by this JVM" : memory + "% full after the last collection"), ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Enters", "average MSPT above " + TickEngineConfig.emergencyTriggerMspt + " ms"
+			+ (TickEngineConfig.emergencyMemoryPercent > 0 ? " or memory at " + TickEngineConfig.emergencyMemoryPercent + "%" : "")
+			+ " for " + TickEngineConfig.emergencyTriggerSeconds + " s", ChatFormatting.WHITE), false);
+		long calm = EmergencyMode.calmSeconds();
+		source.sendSuccess(() -> line("Leaves", "average MSPT below " + TickEngineConfig.emergencyExitMspt + " ms for "
+			+ TickEngineConfig.emergencyExitSeconds + " s" + (EmergencyMode.isActive() && calm >= 0 ? " (low for " + calm + " s now)" : ""),
+			ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("While active", "auto-tuning at its highest level" + (TickEngineConfig.autoTuning ? "" : " (off now)")
+			+ ", far entities and block entities at most every " + TickEngineConfig.emergencyInterval + " ticks"
+			+ (TickEngineConfig.emergencyPauseSpawning ? ", natural mob spawning paused" : "")
+			+ (TickEngineConfig.stackingMode.equals(TickEngineConfig.STACKING_OFF) ? "" : ", entity stacking on")
+			+ (TickEngineConfig.emergencySaveOnEnter ? ", world saved on entering" : ""), ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> Component.literal(TickEngineConfig.emergencyEnabled
+			? " Turn it off with '/tickengine emergency disable'. '/tickengine emergency start' starts it now."
+			: " Turn it on with '/tickengine emergency enable'. '/tickengine emergency start' starts it now.")
+			.withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static int emergencySet(CommandContext<CommandSourceStack> context, boolean enabled) {
+		TickEngineConfig.emergencyEnabled = enabled;
+		TickEngineConfig.changed();
+		context.getSource().sendSuccess(() -> Component.literal(enabled
+			? "Emergency mode is on: it starts by itself when the average MSPT stays above " + TickEngineConfig.emergencyTriggerMspt
+				+ " ms for " + TickEngineConfig.emergencyTriggerSeconds + " s."
+			: "Emergency mode is off" + (EmergencyMode.isActive() && !EmergencyMode.isManual() ? " and ends within a second." : ".")
+		).withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int emergencyStart(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		if (EmergencyMode.isActive()) {
+			source.sendFailure(Component.literal("Emergency mode is already active."));
+			return 0;
+		}
+		EmergencyMode.enter(source.getServer(), "started by " + source.getTextName(), true);
+		source.sendSuccess(() -> Component.literal("Emergency mode started. It ends by itself after the average MSPT stays below "
+			+ TickEngineConfig.emergencyExitMspt + " ms for " + TickEngineConfig.emergencyExitSeconds
+			+ " s, or with '/tickengine emergency stop'.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int emergencyStop(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		if (!EmergencyMode.isActive()) {
+			source.sendFailure(Component.literal("Emergency mode is not active."));
+			return 0;
+		}
+		EmergencyMode.exit(source.getServer(), "stopped by " + source.getTextName());
+		source.sendSuccess(() -> Component.literal("Emergency mode stopped. Auto-tuning is back at its level from before.")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	// --- stacking ---
+
+	/** What has to be typed after '/tickengine stacking confirm' to turn stacking on. */
+	static final String STACKING_PHRASE = "I understand the risks";
+	/** Who asked for which stacking mode, and until when they may confirm. */
+	private static final Map<String, Long> pendingStackingDeadlines = new HashMap<>();
+	private static final Map<String, String> pendingStackingModes = new HashMap<>();
+
+	private static String stackingSummary(MinecraftServer server) {
+		int[] loaded = EntityStacker.loadedStacks(server);
+		String when = switch (TickEngineConfig.stackingMode) {
+			case TickEngineConfig.STACKING_ALWAYS -> "always";
+			case TickEngineConfig.STACKING_AUTO_TUNING -> "at the last auto-tuning level and in emergencies";
+			case TickEngineConfig.STACKING_EMERGENCY -> "only in emergencies";
+			default -> "off";
+		};
+		return when + (EntityStacker.isActive() ? ", running" : ", not running now") + "; " + loaded[0]
+			+ " loaded stacks holding " + loaded[1] + " mobs";
+	}
+
+	private static int stackingStatus(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Entity stacking (experimental)"), false);
+		source.sendSuccess(() -> line("State", stackingSummary(source.getServer()), EntityStacker.isActive()
+			? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		source.sendSuccess(() -> line("Stacks", "up to " + TickEngineConfig.stackMaxSize + " mobs, from cubes of "
+			+ TickEngineConfig.stackAreaBlocks + " blocks", ChatFormatting.WHITE), false);
+		Set<String> excluded = TickEngineConfig.STACK_EXCLUDE.targets();
+		source.sendSuccess(() -> line("Excluded", (excluded.isEmpty() ? "nothing" : String.join(", ", excluded))
+			+ "; change with '/tickengine stacking exclude'.", ChatFormatting.WHITE), false);
+		stackingExplanation(source);
+		source.sendSuccess(() -> Component.literal(" Modes: off, emergency, autoTuning, always. Change with "
+			+ "'/tickengine stacking mode <mode>'.").withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static void stackingExplanation(CommandSourceStack source) {
+		source.sendSuccess(() -> line("What it does", "mobs of the same kind with the same data (colour, sheared or not, "
+			+ "equipment...) standing close together become one mob that counts for several, shown as \"Zombie x7\". "
+			+ "Killing it kills one mob at a time with its normal loot and XP; using it (feeding, shearing, a name tag, a lead) "
+			+ "separates the mob you clicked. Natural spawning counts every mob in a stack. Never stacked: named, tamed or "
+			+ "leashed mobs, babies, animals in love, mobs in combat, riders and their mounts, bosses, and the excluded types.",
+			ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Gain", "one mob ticks instead of up to " + TickEngineConfig.stackMaxSize
+			+ ": in farms and crowded places, most of the entity cost goes away.", ChatFormatting.GREEN), false);
+		source.sendSuccess(() -> line("Risk", "a stack moves, thinks and despawns as one mob, so ten zombies become one "
+			+ "zombie with ten lives; mobs that produce something over time (wool regrowth, for example) produce for one. "
+			+ "Mods that keep their own data about single mobs may not expect the copies made when a stack is killed or used. "
+			+ "If TickEngine is removed, each stack stays one single mob: run '/tickengine stacking unstack' first.",
+			ChatFormatting.YELLOW), false);
+	}
+
+	private static int stackingMode(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		TickEngineConfig.Option<?> option = TickEngineConfig.options().get("stacking.mode");
+		String previous = option.format();
+		if (option.set(StringArgumentType.getString(context, "mode")) != null) {
+			source.sendFailure(Component.literal("Unknown mode. Use off, emergency, autoTuning or always."));
+			return 0;
+		}
+		String requested = option.format();
+		option.set(previous);
+		if (requested.equals(previous)) {
+			source.sendSuccess(() -> Component.literal("Entity stacking is already '" + requested + "'.")
+				.withStyle(ChatFormatting.GRAY), false);
+			return 1;
+		}
+		if (requested.equals(TickEngineConfig.STACKING_OFF)) {
+			pendingStackingDeadlines.remove(source.getTextName());
+			pendingStackingModes.remove(source.getTextName());
+			return applyStackingMode(source, requested);
+		}
+		long now = System.currentTimeMillis();
+		pendingStackingDeadlines.values().removeIf(deadline -> deadline < now);
+		pendingStackingModes.keySet().retainAll(pendingStackingDeadlines.keySet());
+		pendingStackingDeadlines.put(source.getTextName(), now + SPREAD_CONFIRM_MILLIS);
+		pendingStackingModes.put(source.getTextName(), requested);
+		source.sendSuccess(() -> header("Entity stacking: read before turning it on"), false);
+		stackingExplanation(source);
+		String command = "/tickengine stacking confirm " + STACKING_PHRASE;
+		source.sendSuccess(() -> Component.literal(" To set the mode to '" + requested + "', within "
+			+ SPREAD_CONFIRM_MILLIS / 1000 + " s type: ").withStyle(ChatFormatting.GOLD)
+			.append(Component.literal(command).withStyle(style -> style
+				.withColor(ChatFormatting.WHITE)
+				.withUnderlined(true)
+				.withClickEvent(MinecraftCompat.suggestCommand(command))
+				.withHoverEvent(MinecraftCompat.showText(Component.literal("Click to put it in the chat box"))))),
+			false);
+		return 1;
+	}
+
+	private static int stackingConfirm(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		Long deadline = pendingStackingDeadlines.get(source.getTextName());
+		String mode = pendingStackingModes.get(source.getTextName());
+		if (deadline == null || mode == null || System.currentTimeMillis() > deadline) {
+			pendingStackingDeadlines.remove(source.getTextName());
+			pendingStackingModes.remove(source.getTextName());
+			source.sendFailure(Component.literal("Nothing to confirm. Run '/tickengine stacking mode <mode>' first and read the warning."));
+			return 0;
+		}
+		if (!StringArgumentType.getString(context, "phrase").trim().equalsIgnoreCase(STACKING_PHRASE)) {
+			source.sendFailure(Component.literal("The phrase does not match. Type exactly: /tickengine stacking confirm "
+				+ STACKING_PHRASE));
+			return 0;
+		}
+		pendingStackingDeadlines.remove(source.getTextName());
+		pendingStackingModes.remove(source.getTextName());
+		return applyStackingMode(source, mode);
+	}
+
+	private static int applyStackingMode(CommandSourceStack source, String mode) {
+		TickEngineConfig.stackingMode = mode;
+		TickEngineConfig.changed();
+		TickEngine.LOGGER.info("Entity stacking mode set to '{}' by {}.", mode, source.getTextName());
+		String detail = switch (mode) {
+			case TickEngineConfig.STACKING_ALWAYS -> "Mobs start stacking within a second.";
+			case TickEngineConfig.STACKING_AUTO_TUNING -> "Stacking is now the last auto-tuning level"
+				+ (TickEngineConfig.autoTuning ? "" : " (auto-tuning is off: then only emergencies turn it on)")
+				+ ", and runs in emergencies.";
+			case TickEngineConfig.STACKING_EMERGENCY -> "Stacking runs only while emergency mode is active"
+				+ (TickEngineConfig.emergencyEnabled ? "." : " (emergency mode is off: turn it on with '/tickengine emergency enable').");
+			default -> "No new stacks are made. Stacks already there stay until they are killed or used; "
+				+ "'/tickengine stacking unstack' splits them now.";
+		};
+		source.sendSuccess(() -> Component.literal("Entity stacking mode is '" + mode + "' and saved to the config file. "
+			+ detail).withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int stackingUnstack(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		int added = EntityStacker.unstackAll(source.getServer());
+		TickEngine.LOGGER.info("{} split all loaded stacks: {} mobs added.", source.getTextName(), added);
+		source.sendSuccess(() -> Component.literal("Split every loaded stack: " + added + " mobs added. Stacks in unloaded chunks "
+			+ "stay until those chunks load." + (EntityStacker.isActive()
+			? " Stacking is still running and will merge them again: set the mode to off first." : ""))
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int stackExcludeList(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Excluded from entity stacking"), false);
+		Set<String> excluded = TickEngineConfig.STACK_EXCLUDE.targets();
+		if (excluded.isEmpty()) {
+			source.sendSuccess(() -> Component.literal(" nothing listed").withStyle(ChatFormatting.GRAY), false);
+		}
+		excluded.forEach(target -> source.sendSuccess(() -> Component.literal(" " + target).withStyle(ChatFormatting.WHITE), false));
+		return 1;
+	}
+
+	private static int stackExcludeAdd(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		String error = TickEngineConfig.STACK_EXCLUDE.add(target);
+		if (error != null) {
+			source.sendFailure(Component.literal(error));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Excluded from entity stacking: " + target + ". Stacks already there stay; "
+			+ "'/tickengine stacking unstack' splits them.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int stackExcludeRemove(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		if (!TickEngineConfig.STACK_EXCLUDE.remove(target)) {
+			source.sendFailure(Component.literal("'" + target + "' is not excluded from entity stacking."));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("No longer excluded from entity stacking: " + target + ".")
+			.withStyle(ChatFormatting.GREEN), true);
 		return 1;
 	}
 
@@ -726,7 +1024,7 @@ public final class TickEngineCommand {
 			return 0;
 		}
 		// Options with risks can be turned off here, but only turned on after their confirmation.
-		if (option.confirmCommand() != null && !option.format().equals("false")) {
+		if (option.confirmCommand() != null && !option.format().equals(option.safeValue())) {
 			option.set(previous);
 			source.sendFailure(Component.literal(option.key + " has risks and can only be turned on with '"
 				+ option.confirmCommand() + "', which explains them and asks for confirmation."));
@@ -767,8 +1065,7 @@ public final class TickEngineCommand {
 		}
 		String inconsistency = TickEngineConfig.checkConsistency();
 		if (inconsistency != null) {
-			context.getSource().sendSuccess(() -> Component.literal(inconsistency + " Auto-tuning will not relax until"
-				+ " this is fixed.").withStyle(ChatFormatting.YELLOW), false);
+			context.getSource().sendSuccess(() -> Component.literal(inconsistency).withStyle(ChatFormatting.YELLOW), false);
 		}
 		return 1;
 	}

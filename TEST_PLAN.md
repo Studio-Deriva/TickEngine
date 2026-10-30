@@ -40,6 +40,9 @@ dimensione (aggiunta e poi tolta), `spread`. Poi controlla il log:
 Esito: `PASS`/`FAIL` per ogni controllo, log in `build/smoke/<nodo>/server.log`.
 Se un controllo fallisce, guarda prima il log: cerca `Mixin`, `TickEngine`, `Exception`.
 
+Dalla beta.6 lo script prova anche la modalità emergenza avviata a mano (l'auto-tuning sale al massimo e
+torna a 0) e lo stacking (tre mucche diventano "Cow x3", `/damage` ne toglie una, `/kill` toglie il resto).
+
 Lo script **non** copre: l'AI saltata (serve un giocatore vicino), i click in chat, i permessi da
 giocatore. Sono la parte 3.
 
@@ -126,6 +129,30 @@ Il link "[hide notices]" deve inserire il comando nella chat.
 - Da console: niente link cliccabile, solo l'indirizzo breve della pagina e il file.
 - Un giocatore senza `tickengine.report` (LuckPerms) non vede `report` e riceve un errore se lo scrive.
 
+**h. Stacking con un giocatore (beta.6).** Fatto il 30/10 su 1.21.11 con un giocatore di test entrato dal
+normale login del server (senza client grafico): grano, forbici, guinzaglio, accoppiamento, XP, mob cap,
+despawn, tutto come atteso (dettagli nel README). Resta solo da guardare con un client vero che il nome
+"Cow x10" compaia sopra la pila. Il resto qui sotto vale per ripetere i test sulle altre versioni:
+- `/tickengine stacking mode always` e conferma; evoca 10 mucche su un punto. Guardandole da vicino si
+  vede "Cow x10" sopra una sola mucca; con `stacking.alwaysShowCount true` si vede sempre.
+- Grano sulla pila: si separa una mucca in amore, la pila diventa x9. Un'altra mucca separata col grano:
+  le due si accoppiano e nasce un vitello, che non entra in pila finché è cucciolo.
+- Uccidi la pila con la spada: muore una mucca alla volta, ognuna con carne, cuoio e **XP** (l'XP cade
+  solo se uccide un giocatore: dalla console non si poteva provare).
+- Pecora: le forbici tosano una pecora sola. Guinzaglio: lega una mucca sola.
+- Mob cap: di notte, in un'area di soli mostri, con stacking `always`, il numero di mostri **contati
+  con le pile** (`/tickengine stacking` mostra quanti mob tengono le pile) non deve superare quello di
+  un server senza stacking (cap ~70 per giocatore). Dalla console non si poteva provare: lo spawn naturale
+  avviene solo vicino ai giocatori.
+- Despawn: allontanati oltre 128 blocchi da una pila di zombie: sparisce tutta la pila (come mob singoli).
+
+**i. Emergenza con un giocatore (beta.6).** Pausa dello spawn verificata il 30/10 su 1.21.11 col giocatore
+di test; mancano i messaggi in chat agli admin visti da un client. `/tickengine emergency enable`, poi
+`/tickengine emergency start`. Di notte in superficie non devono comparire nuovi mostri finché è attiva
+(spawn naturale in pausa; dalla console non si poteva provare). La view distance scende al minimo e
+torna com'era con `/tickengine emergency stop`. Gli admin collegati ricevono il messaggio rosso all'avvio
+e quello verde alla fine.
+
 ## 4. Jar sbagliato
 
 Metti `tickengine-1.0.0-beta.5+1.21.1.jar` su un server 1.21.4. Atteso: Fabric si rifiuta di avviare
@@ -145,7 +172,7 @@ Ripeti con il jar `+1.21.11` su 1.21.10.
 
 | Test | 1.21 | 1.21.1 | 1.21.2 | 1.21.4 | 1.21.5 | 1.21.6 | 1.21.8 | 1.21.9 | 1.21.10 | 1.21.11 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1. Smoke dev | – | PASS (27/10) | | – | | | – | | – | |
+| 1. Smoke dev | – | PASS (30/10, beta.6) | PASS (30/10, beta.6) | – | PASS (30/10, beta.6) | PASS (30/10, beta.6) | – | PASS (30/10, beta.6) | – | PASS (30/10, beta.6) |
 | 2. Server vero | | – | – | | – | – | | – | | – |
 | 3a. AI saltata | | | | | | | | | | |
 | 3b. Click chat | | | | | | | | | | |

@@ -9,6 +9,7 @@ import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
+import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import com.studioderiva.tickengine.tuning.AutoTuner;
@@ -279,6 +280,10 @@ public final class DiagnosticReport {
 			: TickEngineConfig.entityThrottle ? "paused (ServerCore activation range)" : "off"));
 		lines.add("- Tick spreading: " + (TickEngineConfig.spreadEntityTicks ? "on" : "off"));
 		lines.add("- Auto-tuning: " + TickEngineCommand.tuningSummary(server));
+		lines.add("- Emergency mode: " + TickEngineCommand.emergencySummary());
+		int[] stacks = EntityStacker.loadedStacks(server);
+		lines.add("- Entity stacking: mode " + TickEngineConfig.stackingMode + (EntityStacker.isActive() ? ", running" : "")
+			+ ", " + stacks[0] + " loaded stacks holding " + stacks[1] + " mobs");
 		AutoTuner.Values values = AutoTuner.values();
 		lines.add("- Effective now: block entities every " + values.blockEntityInterval() + " ticks beyond " + values.blockEntityRadius()
 			+ " chunks; entities AI every " + values.entityAiInterval() + ", far tick every " + values.entityTickInterval()

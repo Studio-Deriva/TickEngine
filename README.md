@@ -40,6 +40,11 @@ ServerCore, not instead of them.
 - **MSPT-based auto-tuning.** Above 45 ms it tightens one level, below 30 ms it relaxes one, least
   visible step first: intervals, radii, simulation distance, view distance. Runtime only: it never
   writes your config or server.properties.
+- **Emergency mode.** Off by default. When turned on and the server is about to fall over (MSPT above
+  150 ms for 30 s, or memory almost full), it throttles as hard as it can until the load is gone, then
+  puts everything back.
+- **Entity stacking.** Experimental, off by default. Mobs of the same kind standing together become one
+  mob that counts for up to 10: always, only in emergencies, or as the last auto-tuning level.
 - **Fully configurable, live.** A commented `config/tickengine.json5`, every option also settable by
   command and saved to the file.
 - **ServerCore aware.** If ServerCore already throttles entities or manages distances, TickEngine steps
@@ -198,6 +203,7 @@ Levels tighten in this order, least visible first, and relax in reverse:
 3. throttle radii, one chunk per level (block entities down to 2, entity full radius to 1, AI radius to 2)
 4. simulation distance, one per level, down to 4
 5. view distance, one per level, down to 6
+6. entity stacking, only with `stacking.mode` set to `autoTuning` (see Entity stacking)
 
 If the load sits close to players, the first levels can't reduce it and auto-tuning goes on to the
 distances. Turn those steps off with `autoTuning.tuneSimulationDistance` and `tuneViewDistance` if you
@@ -206,6 +212,78 @@ would rather keep them.
 Every limit and step is configurable. Auto-tuning starts at level 0 after a restart and puts the
 original distances back when it relaxes or the server stops. Each level change is logged and, with
 `autoTuning.notifyAdmins`, sent to admins.
+
+## Emergency mode
+
+Off by default; turn it on with `/tickengine emergency enable`. It is for the moment a server is about
+to fall over, not for ordinary lag (auto-tuning handles that).
+
+**When it starts.** Every 20 ticks TickEngine compares the average tick time of those ticks with
+`emergency.triggerMspt` (150 ms, about 6.7 TPS) and, when `emergency.memoryPercent` is not 0, how full
+the old generation of the Java heap still is after a garbage collection (90%: close to an
+out-of-memory crash). If either stays critical for `triggerSeconds` (30 s of real time), the mode
+starts. `/tickengine emergency start` starts it by hand.
+
+**What it does.**
+
+- auto-tuning jumps to its highest level at once (if auto-tuning is on);
+- entities and block entities away from players tick at most once every `emergency.interval` ticks
+  (20), force-loaded chunks included; rules with 1 (pistons, Elder Guardians, Wardens) still never
+  throttle;
+- natural mob spawning pauses (`emergency.pauseMobSpawning`); spawners, raids and commands still work;
+- with `stacking.mode` set to `emergency`, `autoTuning` or `always`, mobs are stacked;
+- the world is saved when it starts (`emergency.saveOnEnter`, at most once every 10 minutes), so a
+  crash that follows loses less.
+
+**When it ends.** After the average stays below `exitMspt` (60 ms) for `exitSeconds` (60 s) with memory
+fine, or with `/tickengine emergency stop`. Auto-tuning goes straight back to the level it had before;
+stacks made during the emergency stay.
+
+What it cannot do: save a server from one single tick that freezes it (the watchdog stops the server
+when one tick takes longer than `max-tick-time`, 60 s by default). It acts between ticks.
+
+Measured on the 1.21.11 dev server with 2500 pigs packed in a glass box (`stacking.mode emergency`,
+trigger lowered to 50 ms for 5 s for the test): about 220 ms per tick before, emergency started after
+5 s, the pigs became 257 stacks within 5 s, and the server was back at 2–4 ms per tick (20 TPS).
+
+## Entity stacking (experimental)
+
+Off by default. Mobs of the same kind standing close together become one mob that counts for several
+(up to `stacking.maxSize`, 10), shown as "Cow x7" when you look at it (`stacking.alwaysShowCount` to show
+it all the time). One mob ticks instead of ten.
+
+**When.** `stacking.mode`: `off`, `emergency` (only during emergency mode), `autoTuning` (as the last
+auto-tuning level, and during emergencies) or `always`. Only `/tickengine stacking mode <mode>` turns it
+on, after explaining the risks and asking for `/tickengine stacking confirm I understand the risks`;
+`/tickengine config set` can only set it to `off`.
+
+**What stacks.** Once a second the mobs are grouped by type and by cube of `stacking.areaBlocks` (5)
+blocks per side (the grid moves by half a cube every other second, so mobs on a cube edge meet too);
+inside a cube, mobs whose saved data is the same stack together. Position, health,
+timers and similar values are ignored; everything else must match, modded data included: a red and a
+white sheep, a sheared and a woolly one, two horses with different stats never stack. The work is
+spread over several ticks with a time limit per tick, so even thousands of mobs never make one long
+tick.
+
+Never stacked: mobs with a name from a player, tamed or owned mobs, leashed mobs, babies, animals in
+love, mobs in combat, riders and their mounts, bosses, and what is in `stacking.exclude` (villagers and
+wandering traders by default, for their trades). Change the list with `/tickengine stacking exclude`.
+
+**How a stack behaves.**
+
+- Killing it kills one mob at a time, with its own loot and XP; the rest stays as a stack. Farms give
+  the same as without stacking. `/kill` removes the whole stack.
+- Using it in a way that does something (feeding, shearing, a name tag, a lead, a spawn egg) separates
+  the mob you clicked; the rest stays a stack. So feeding a stack of cows breeds them as usual.
+- Natural spawning counts every mob in a stack, so the mob cap stays as without stacking.
+- The count is kept in a tag, `tickengine.stack.<n>` (usable in selectors: `@e[tag=tickengine.stack.10]`),
+  and survives restarts.
+
+**The risks.** A stack moves, thinks and despawns as one mob: ten zombies become one zombie with ten
+lives, and mobs that produce something over time (wool regrowth, for example) produce for one. Mods
+that keep their own data about single mobs may not expect the copies made when a stack is killed or
+used. If you remove TickEngine, each stack stays one single mob: run `/tickengine stacking unstack`
+first, which splits every loaded stack back into single mobs.
 
 ## Configuration
 
@@ -221,7 +299,11 @@ ones:
                      "defaultAiInterval": 4, "defaultTickInterval": 4,
                      "rules": { "minecraft:elder_guardian": { "ai": 1, "tick": 1 } } },
   "autoTuning":    { "enabled": true, "raiseAboveMspt": 45, "lowerBelowMspt": 30,
-                     "relaxAfterSeconds": 60 }
+                     "relaxAfterSeconds": 60 },
+  "emergency":     { "enabled": false, "triggerMspt": 150, "triggerSeconds": 30, "memoryPercent": 90,
+                     "exitMspt": 60, "exitSeconds": 60, "interval": 20, "pauseMobSpawning": true },
+  "stacking":      { "mode": "off", "maxSize": 10, "areaBlocks": 5,
+                     "exclude": ["minecraft:villager", "minecraft:wandering_trader"] }
 }
 ```
 
@@ -251,6 +333,13 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine spread` | Tick spreading: state, what it does, gain and risk |
 | `/tickengine spread enable` / `confirm <phrase>` / `disable` | Turn tick spreading on (after reading the warning and typing the phrase) or off |
 | `/tickengine spread exclude add\|remove <target>` / `list` | Types or mods that tick spreading never moves (`minecraft:villager`, `somemod:*`) |
+| `/tickengine emergency` | Emergency mode: state, load, thresholds and what it changes |
+| `/tickengine emergency enable` / `disable` | Let it start by itself, or not |
+| `/tickengine emergency start` / `stop` | Start or end it now |
+| `/tickengine stacking` | Entity stacking: mode, loaded stacks, what it does, gain and risk |
+| `/tickengine stacking mode <off\|emergency\|autoTuning\|always>` / `confirm <phrase>` | When stacking runs (anything but off after reading the warning and typing the phrase) |
+| `/tickengine stacking unstack` | Split every loaded stack back into single mobs |
+| `/tickengine stacking exclude add\|remove <target>` / `list` | Types or mods that are never stacked |
 | `/tickengine report` | Report a problem: click what it is about (general, a block entity, an entity, a mod), then see the next section |
 | `/tickengine report general\|blockentity <type>\|entity <type>\|mod <mod id>` | Collect a diagnostic report and get a link that opens it as a GitHub issue (Tab completes the type or mod) |
 
@@ -337,6 +426,27 @@ Checked after the audit:
   half their speed, and auto-tuning raises the limit to 4 when the server goes above 45 ms per
   tick, right after the intervals, and lowers it again when the load is gone. Far areas without
   force-loading use interval 4 by default.
+
+Emergency mode and entity stacking (beta.6) were checked on the 1.21.11 dev server, with a test player
+joined through the server's normal login code (a `ServerPlayer` without a network client, whose clicks
+go through the same packet handler a client's do):
+
+- stacks form and keep sheep colours, sheared sheep, babies and named mobs apart, and survive a
+  restart; a kill takes one mob with its loot until none is left; `/tickengine stacking unstack`
+  splits them;
+- the player's wheat, shears and lead separate one mob; two cows separated with wheat bred a calf;
+- a player kill drops XP (3 points from a cow of a stack of 3);
+- mob cap: at night around the player, 56-63 monster entities held 70-73 monsters, the vanilla cap of
+  70, so stacking does not let more monsters spawn;
+- emergency mode paused natural spawning (no monster in 45 s at night, 71 again 45 s after it ended);
+- a zombie stack more than 128 blocks from the player despawned whole, as single zombies do;
+- the memory trigger: on a 600 MB heap filled with force-loaded chunks, emergency mode started when
+  the old generation was 91% full after collection, and saved the world. The server still ran out of
+  memory later, since the test kept loading chunks: emergency mode lowers the work per tick, it cannot
+  unload chunks;
+- the 2500-pig emergency above; `tools/smoke-test.sh` passes on all six jars.
+
+Not checked: how the count looks on a real client ("Cow x7" is a normal custom name, so vanilla draws it).
 
 ## Contributing
 

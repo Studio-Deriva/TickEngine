@@ -3,12 +3,20 @@ package com.studioderiva.tickengine.compat;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.LevelHeightAccessor;
+//? if >=1.21.2
+import net.minecraft.world.entity.EntitySpawnReason;
+//? if >=1.21.6 {
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.level.storage.TagValueOutput;
+//?}
 //? if >=1.21.11
 import net.minecraft.server.permissions.PermissionLevel;
 
@@ -88,6 +96,28 @@ public final class MinecraftCompat {
 		return level.getMaxY();
 		//?} else {
 		/*return level.getMaxBuildHeight() - 1;
+		*///?}
+	}
+
+	/** The entity as NBT, with its type id, like a saved chunk holds it. */
+	public static CompoundTag saveEntity(Entity entity) {
+		//? if >=1.21.6 {
+		TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, entity.level().registryAccess());
+		entity.saveWithoutId(output);
+		CompoundTag tag = output.buildResult();
+		//?} else {
+		/*CompoundTag tag = entity.saveWithoutId(new CompoundTag());
+		*///?}
+		tag.putString("id", EntityType.getKey(entity.getType()).toString());
+		return tag;
+	}
+
+	/** A new entity from NBT made by {@link #saveEntity}, not yet added to the level; null when it cannot be read. */
+	public static Entity loadEntity(CompoundTag tag, ServerLevel level) {
+		//? if >=1.21.2 {
+		return EntityType.loadEntityRecursive(tag, level, EntitySpawnReason.LOAD, entity -> entity);
+		//?} else {
+		/*return EntityType.loadEntityRecursive(tag, level, entity -> entity);
 		*///?}
 	}
 }

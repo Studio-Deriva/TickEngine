@@ -1,7 +1,9 @@
 package com.studioderiva.tickengine.tuning;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import org.junit.jupiter.api.AfterEach;
@@ -153,5 +155,45 @@ class AutoTunerTest {
 		set("autoTuning.maxForcedChunkInterval", "3");
 		assertEquals(2, at(4).entityForcedMax(), "no safe value between 2 and a maximum of 3");
 		forcedDefaults();
+	}
+
+	@Test
+	void stackingIsTheLastLevelOnlyInAutoTuningMode() {
+		forcedDefaults();
+		int withoutStacking = AutoTuner.maxLevel(null);
+		assertFalse(at(withoutStacking).stackEntities());
+		try {
+			TickEngineConfig.stackingMode = TickEngineConfig.STACKING_AUTO_TUNING;
+			TickEngineConfig.invalidateCaches();
+			assertEquals(withoutStacking + 1, AutoTuner.maxLevel(null), "one more level");
+			assertFalse(at(withoutStacking).stackEntities(), "every other step comes first");
+			assertTrue(at(withoutStacking + 1).stackEntities());
+			TickEngineConfig.stackingMode = TickEngineConfig.STACKING_ALWAYS;
+			TickEngineConfig.invalidateCaches();
+			assertEquals(withoutStacking, AutoTuner.maxLevel(null), "'always' needs no level");
+		} finally {
+			TickEngineConfig.stackingMode = TickEngineConfig.STACKING_OFF;
+			TickEngineConfig.invalidateCaches();
+		}
+	}
+
+	@Test
+	void emergencyJumpsToTheHighestLevelAndHoldsIt() {
+		forcedDefaults();
+		set("autoTuning.enabled", "true");
+		set("autoTuning.decisionSeconds", "2");
+		set("autoTuning.relaxAfterSeconds", "0");
+		try {
+			EmergencyMode.enter(null, "test", true);
+			decision(0);
+			assertEquals(AutoTuner.maxLevel(null), AutoTuner.level(), "a calm decision during an emergency still goes to the top");
+			decision(0);
+			assertEquals(AutoTuner.maxLevel(null), AutoTuner.level(), "and does not relax");
+			EmergencyMode.exit(null, "test");
+			assertEquals(0, AutoTuner.level(), "after it, the level from before comes back at once");
+		} finally {
+			EmergencyMode.shutdown();
+			set("autoTuning.relaxAfterSeconds", "60");
+		}
 	}
 }

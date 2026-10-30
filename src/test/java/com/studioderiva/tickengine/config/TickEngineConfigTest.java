@@ -23,4 +23,34 @@ class TickEngineConfigTest {
 			option.set(previous);
 		}
 	}
+
+	@Test
+	void stackingModeAcceptsOnlyItsChoicesAndNeedsAConfirmation() {
+		TickEngineConfig.Option<?> option = TickEngineConfig.options().get("stacking.mode");
+		String previous = option.format();
+		try {
+			assertNull(option.set(" AUTOTUNING "));
+			assertEquals("autoTuning", option.format(), "stored as written in the choices");
+			assertNotNull(option.set("sometimes"));
+			assertEquals("autoTuning", option.format());
+			assertEquals("off", option.safeValue(), "config set may only turn it off");
+			assertNotNull(option.confirmCommand());
+		} finally {
+			option.set(previous);
+		}
+	}
+
+	@Test
+	void emergencyThresholdsMustBeConsistent() {
+		TickEngineConfig.Option<?> exit = TickEngineConfig.options().get("emergency.exitMspt");
+		String previous = exit.format();
+		try {
+			assertNull(exit.set("150"));
+			assertNotNull(TickEngineConfig.checkConsistency(), "leaving at the entry threshold would flip-flop");
+			assertNull(exit.set("60"));
+			assertNull(TickEngineConfig.checkConsistency());
+		} finally {
+			exit.set(previous);
+		}
+	}
 }
