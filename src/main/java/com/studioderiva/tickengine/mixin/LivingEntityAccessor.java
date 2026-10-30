@@ -4,7 +4,10 @@ import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
-/** Lets the minimal tick advance the idle time that drives random despawning. */
+/**
+ * Lets the minimal tick advance the idle time that drives random despawning, and entity stacking
+ * see whether {@code die} already ran.
+ */
 @Mixin(LivingEntity.class)
 public interface LivingEntityAccessor {
 	@Accessor("noActionTime")
@@ -12,4 +15,7 @@ public interface LivingEntityAccessor {
 
 	@Accessor("noActionTime")
 	void tickengine$setNoActionTime(int noActionTime);
+
+	@Accessor("dead")
+	boolean tickengine$isDead();
 }

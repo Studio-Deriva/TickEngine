@@ -2,7 +2,9 @@ package com.studioderiva.tickengine.gametest;
 
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.tuning.AutoTuner;
+import com.studioderiva.tickengine.tuning.EmergencyMode;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -41,7 +43,10 @@ final class TestSupport {
 	private static final Map<String, Integer> BLOCK_ENTITY_RULES = new LinkedHashMap<>();
 	private static final Map<String, ThrottleRules.EntityIntervals> ENTITY_RULES = new LinkedHashMap<>();
 
+	private static final List<String> STACK_EXCLUDE = new ArrayList<>();
+
 	static {
+		STACK_EXCLUDE.addAll(TickEngineConfig.STACK_EXCLUDE.targets());
 		TickEngineConfig.options().forEach((key, option) -> DEFAULTS.put(key, option.format()));
 		BLOCK_ENTITY_RULES.putAll(TickEngineConfig.BLOCK_ENTITY_RULES.rules());
 		ENTITY_RULES.putAll(TickEngineConfig.ENTITY_RULES.rules());
@@ -56,7 +61,8 @@ final class TestSupport {
 	}
 
 	/**
-	 * Puts the config back to the defaults (rules as at startup, entities.spreadExclude empty), then applies the
+	 * Puts the config back to the defaults (rules as at startup, entities.spreadExclude empty,
+	 * stacking.exclude as at startup, no emergency), then applies the
 	 * given key/value pairs. The baseline
 	 * also turns off what would make results depend on timing or test order: auto-tuning (real
 	 * MSPT spikes at startup), waking new entities, tick spreading (it moves tick counters 5 s
@@ -72,6 +78,11 @@ final class TestSupport {
 		}
 		DEFAULTS.forEach((key, value) -> set(key, value));
 		new ArrayList<>(TickEngineConfig.SPREAD_EXCLUDE.targets()).forEach(TickEngineConfig.SPREAD_EXCLUDE::remove);
+		new ArrayList<>(TickEngineConfig.STACK_EXCLUDE.targets()).forEach(TickEngineConfig.STACK_EXCLUDE::remove);
+		STACK_EXCLUDE.forEach(TickEngineConfig.STACK_EXCLUDE::add);
+		EmergencyMode.exit(server, "test setup");
+		EmergencyMode.shutdown();
+		EntityStacker.reset();
 		restore(TickEngineConfig.BLOCK_ENTITY_RULES, BLOCK_ENTITY_RULES);
 		restore(TickEngineConfig.ENTITY_RULES, ENTITY_RULES);
 		set("autoTuning.enabled", "false");

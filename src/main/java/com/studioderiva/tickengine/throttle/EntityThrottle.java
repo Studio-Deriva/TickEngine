@@ -8,6 +8,7 @@ import com.studioderiva.tickengine.mixin.ExperienceOrbAccessor;
 import com.studioderiva.tickengine.mixin.ItemEntityAccessor;
 import com.studioderiva.tickengine.mixin.LivingEntityAccessor;
 import com.studioderiva.tickengine.tuning.AutoTuner;
+import com.studioderiva.tickengine.tuning.EmergencyMode;
 import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.HashMap;
@@ -144,7 +145,7 @@ public final class EntityThrottle {
 		boolean aiZone = distance <= AutoTuner.values().entityAiRadius();
 		int interval = aiZone ? rule.ai() : rule.tick();
 		if (interval > 1 && forcedChunks.contains(chunk)) {
-			interval = Math.min(interval, AutoTuner.values().entityForcedMax());
+			interval = Math.min(interval, EmergencyMode.adjustInterval(AutoTuner.values().entityForcedMax()));
 		}
 		if (interval <= 1) {
 			fullNow++;
@@ -208,7 +209,7 @@ public final class EntityThrottle {
 		return !entity.onGround() && !entity.isNoGravity() && entity.getDeltaMovement().y < -0.1;
 	}
 
-	private static boolean inCombat(LivingEntity living) {
+	public static boolean inCombat(LivingEntity living) {
 		// lastHurtByMob is only set when the damage comes from a living entity (directly or
 		// with a projectile), so fire, cactus and other environmental damage do not count.
 		if (living.getLastHurtByMob() != null
@@ -238,6 +239,8 @@ public final class EntityThrottle {
 			rule = id == null ? new ThrottleRules.EntityIntervals(1, 1) : TickEngineConfig.ENTITY_RULES.resolve(id,
 				level.dimension().location(), TickEngineConfig.entityDimensionRulesEnabled,
 				new ThrottleRules.EntityIntervals(AutoTuner.values().entityAiInterval(), AutoTuner.values().entityTickInterval()));
+			// The cache is rebuilt when emergency mode starts or ends (it bumps the config version).
+			rule = new ThrottleRules.EntityIntervals(EmergencyMode.adjustInterval(rule.ai()), EmergencyMode.adjustInterval(rule.tick()));
 			cache.put(type, rule);
 		}
 		return rule;

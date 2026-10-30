@@ -27,7 +27,11 @@ import net.minecraft.server.players.PlayerList;
  *   <li>throttle radii, one chunk per step</li>
  *   <li>simulation distance, one per step</li>
  *   <li>view distance, one per step</li>
+ *   <li>entity stacking, only with stacking.mode autoTuning</li>
  * </ol>
+ *
+ * <p>During {@link EmergencyMode} the level jumps to the highest one and stays there; when it
+ * ends, the level from before comes back at once.
  *
  * <p>Everything is runtime only. Distances are changed through {@link PlayerList}, which does not
  * write server.properties (DedicatedServer's setters would). Level 0 restores the original
@@ -44,13 +48,15 @@ public final class AutoTuner {
 	/** Effective values the throttles use. Distances are -1 when auto-tuning does not touch them. */
 	public record Values(int blockEntityInterval, int blockEntityRadius, int entityAiInterval, int entityTickInterval,
 		int entityFullRadius, int entityAiRadius, int blockEntityForcedMax, int entityForcedMax,
-		int simulationDistance, int viewDistance) {
+		int simulationDistance, int viewDistance, boolean stackEntities) {
 	}
 
 	private static MinecraftServer server;
 	private static int level;
 	private static int maxLevel;
 	private static boolean paused;
+	/** The level before emergency mode raised it; -1 outside an emergency. */
+	private static int levelBeforeEmergency = -1;
 	private static Values values;
 	private static int valuesConfigVersion = -1;
 
@@ -106,6 +112,16 @@ public final class AutoTuner {
 			return;
 		}
 		refresh();
+		if (EmergencyMode.isActive()) {
+			if (levelBeforeEmergency < 0) {
+				levelBeforeEmergency = level;
+			}
+			if (level < maxLevel) {
+				setLevel(maxLevel, "emergency mode");
+			}
+			lowSeconds = 0;
+			return;
+		}
 		if (paused) {
 			return;
 		}
@@ -156,6 +172,36 @@ public final class AutoTuner {
 		return level;
 	}
 
+	/** Jumps to the highest level at once when emergency mode starts (also when paused, which it keeps). */
+	public static void emergency(MinecraftServer currentServer) {
+		if (!TickEngineConfig.autoTuning) {
+			return;
+		}
+		server = currentServer;
+		refresh();
+		if (levelBeforeEmergency < 0) {
+			levelBeforeEmergency = level;
+		}
+		if (level < maxLevel) {
+			setLevel(maxLevel, "emergency mode");
+		}
+	}
+
+	/** Back to the level from before the emergency, which the load needed then. */
+	public static void emergencyOver(MinecraftServer currentServer) {
+		int previous = levelBeforeEmergency;
+		levelBeforeEmergency = -1;
+		if (previous < 0 || !TickEngineConfig.autoTuning) {
+			return;
+		}
+		server = currentServer;
+		refresh();
+		resetRelaxState();
+		if (level > previous) {
+			setLevel(previous, "emergency mode over");
+		}
+	}
+
 	public static void pause() {
 		paused = true;
 	}
@@ -172,6 +218,7 @@ public final class AutoTuner {
 		restoreDistances();
 		server = null;
 		paused = false;
+		levelBeforeEmergency = -1;
 		windowNanos = 0;
 		windowTicks = 0;
 		lastAverageMspt = 0;
@@ -293,8 +340,13 @@ public final class AutoTuner {
 				}
 			}
 		}
+		boolean stack = false;
+		if (TickEngineConfig.stackingMode.equals(TickEngineConfig.STACKING_AUTO_TUNING) && remaining > 0) {
+			stack = true;
+			remaining--;
+		}
 		return new Values(beInterval, beRadius, aiInterval, tickInterval, fullRadius, aiRadius, beForced, entityForced,
-			simulation, view);
+			simulation, view, stack);
 	}
 
 	/** Highest level that still changes something. */
@@ -368,6 +420,9 @@ public final class AutoTuner {
 		change(changes, "entity AI radius", before.entityAiRadius(), after.entityAiRadius());
 		change(changes, "simulation distance", before.simulationDistance(), after.simulationDistance());
 		change(changes, "view distance", before.viewDistance(), after.viewDistance());
+		if (before.stackEntities() != after.stackEntities()) {
+			changes.add("entity stacking " + (after.stackEntities() ? "on" : "off"));
+		}
 		return changes.isEmpty() ? "no change" : String.join(", ", changes);
 	}
 

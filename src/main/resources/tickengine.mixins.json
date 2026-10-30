@@ -11,7 +11,10 @@
 		"ItemEntityAccessor",
 		"LevelMixin",
 		"LivingEntityAccessor",
+		"LivingEntityStackMixin",
 		"MobMixin",
+		"NaturalSpawnerMixin",
+		"PlayerStackMixin",
 		"ServerLevelMixin"
 	],
 	"injectors": {

@@ -6,9 +6,11 @@ import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.permission.TickEnginePermissions;
 import com.studioderiva.tickengine.profiler.TickProfiler;
+import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import com.studioderiva.tickengine.tuning.AutoTuner;
+import com.studioderiva.tickengine.tuning.EmergencyMode;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -41,22 +43,30 @@ public final class TickEngine {
 			if (event.phase == TickEvent.Phase.START) {
 				TickProfiler.onTickStart(event.getServer());
 				AutoTuner.onTickStart();
+				EmergencyMode.onTickStart();
 			} else {
 				TickProfiler.onTickEnd(event.getServer());
 				BlockEntityThrottle.onTickEnd();
 				EntityThrottle.onTickEnd();
 				ServerCoreCompat.tick();
+				// Before auto-tuning, so a decision in the same tick already sees the emergency.
+				EmergencyMode.onTickEnd(event.getServer());
 				AutoTuner.onTickEnd(event.getServer());
+				EntityStacker.onTickEnd(event.getServer());
 				AdminNotices.tick(event.getServer());
 			}
 		});
 		bus.addListener((ServerStartedEvent event) -> ServerCoreCompat.refresh());
 		// Before worlds save, so the original distances are back in place.
-		bus.addListener((ServerStoppingEvent event) -> AutoTuner.shutdown());
+		bus.addListener((ServerStoppingEvent event) -> {
+			EmergencyMode.shutdown();
+			AutoTuner.shutdown();
+		});
 		bus.addListener((ServerStoppedEvent event) -> {
 			TickProfiler.reset();
 			BlockEntityThrottle.reset();
 			EntityThrottle.reset();
+			EntityStacker.reset();
 			AdminNotices.reset();
 		});
 		bus.addListener((PlayerEvent.PlayerLoggedInEvent event) -> {
@@ -68,8 +78,9 @@ public final class TickEngine {
 		bus.addListener(TickEnginePermissions::onGatherNodes);
 
 		LOGGER.info("TickEngine initialized (light profiler {}, block entity throttling {}, entity throttling {}, "
-			+ "tick spreading {}, auto-tuning {})", TickEngineConfig.profilerEnabled ? "on" : "off",
+			+ "tick spreading {}, auto-tuning {}, emergency mode {}, entity stacking {})", TickEngineConfig.profilerEnabled ? "on" : "off",
 			TickEngineConfig.blockEntityThrottle ? "on" : "off", TickEngineConfig.entityThrottle ? "on" : "off",
-			TickEngineConfig.spreadEntityTicks ? "on" : "off", TickEngineConfig.autoTuning ? "on" : "off");
+			TickEngineConfig.spreadEntityTicks ? "on" : "off", TickEngineConfig.autoTuning ? "on" : "off",
+			TickEngineConfig.emergencyEnabled ? "on" : "off", TickEngineConfig.stackingMode);
 	}
 }

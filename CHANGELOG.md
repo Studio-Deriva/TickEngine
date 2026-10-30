@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+As in the Fabric version's 1.0.0-beta.6 (without `/tickengine report`, which stays Fabric only):
+
+- **Emergency mode** (`/tickengine emergency`), off by default. When turned on and the average MSPT stays
+  above `emergency.triggerMspt` (150 ms) for `triggerSeconds` (30 s), or the old generation of the Java
+  heap stays 90% full after garbage collection, it throttles as hard as it can: auto-tuning to its
+  highest level at once, far entities and block entities at most every `emergency.interval` (20) ticks,
+  natural mob spawning paused, the world saved once. It ends after the MSPT stays below `exitMspt`
+  (60 ms) for `exitSeconds` (60 s); auto-tuning then goes straight back to its level from before.
+  `/tickengine emergency start` and `stop` run it by hand.
+- **Entity stacking** (`/tickengine stacking`), experimental and off by default. Mobs of the same kind
+  with the same data standing close together become one mob that counts for up to 10 ("Cow x7"). Killing
+  a stack kills one mob at a time with its own loot and XP; using it (food, shears, name tag, lead)
+  separates the mob you clicked (hooked on the player's interaction, so shearing through Forge's
+  `IForgeShearable` counts too); natural spawning counts every mob in a stack. `/kill` removes whole
+  stacks. Never stacked: named, tamed, owned or leashed mobs, babies, animals in love, mobs in combat,
+  riders and mounts, bosses, villagers and wandering traders (`stacking.exclude`). `stacking.mode`:
+  `off`, `emergency`, `autoTuning` (a new last auto-tuning level) or `always`; anything but off needs the
+  confirmation in `/tickengine stacking mode`. Run `/tickengine stacking unstack` before removing
+  TickEngine, or each stack stays one mob.
+- GameTests for both (12 new, 58 in all) and JUnit tests for the emergency timing and stack data (19 in
+  all). The config file path is now looked up when it is read, so JUnit tests can load the config class.
 - Same fixes as the Fabric version: turning tick spreading on also moves the entities exactly at the
   spreading tick, and `/tickengine config set entities.spreadTicks false` turns spreading off.
 - Auto-tuning raises the force-loaded chunk limit from 2 to 4 under load, as in the Fabric version.
