@@ -8,6 +8,20 @@
   chunk to teleport) and in an HTML report. Needs `tickengine.profile`. No cost when no session runs.
 - Tested in game on 1.21.1, 1.21.6, 1.21.9 and 1.21.11 and with a Fabric modpack; the sent size matches
   what the server process really sent within about 1%. `tools/smoke-test.sh` checks it on every version.
+- **Fix: entity stacking duplicated items.** An item a stack picked up (a zombie's sword, a piglin's gold,
+  a fox's item, an enderman's block) came back with every mob of the stack: killed one by one, a stack of
+  5 that picked up one diamond sword dropped 5, and `/tickengine stacking unstack` gave all 4 mobs of a
+  stack the sword. Now only one mob holds it, and mobs holding something they picked up never stack.
+- **Fix: a bucket took a whole stack.** Picking up a stack of fish or axolotls with a bucket removed every
+  mob in it; now the bucket takes one and the rest stays. The same for shearing a stack of mooshrooms:
+  one turns into a cow.
+- **Fix: dyeing a stack of sheep dyed all of them** with one dye. Using a stack is now caught where the
+  player uses an entity, so items that act on a mob themselves (dye) separate one mob too.
+- **Fix: a stack that converted kept its old name.** A drowned stack was named "Zombie x3", and when one
+  mob was left it kept that name for good and never stacked again. Now it reads "Drowned x3"; on 1.21.1,
+  where conversions do not copy tags, the converted stack also kept only one mob, and now keeps them all.
+- **Fix: network profiler, chunks.** A packet that changes several kinds of blocks in a chunk was counted
+  once per kind of block in the chunk's packets per second.
 
 ## 1.0.0-beta.6
 

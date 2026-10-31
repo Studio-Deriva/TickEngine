@@ -65,8 +65,9 @@ class NetworkWindowTest {
 		assertEquals(75, stone.wireBytes());
 		assertEquals(100, pipe.rawBytes());
 		assertEquals(25, pipe.wireBytes());
-		// The chunk gets the whole packet, once per share.
+		// The chunk gets the whole packet, counted once however many blocks it carries.
 		assertEquals(100, snapshot.chunks.get(0).wireBytes());
+		assertEquals(1, snapshot.chunks.get(0).packets());
 		assertEquals(STONE, snapshot.chunks.get(0).topSource());
 		assertEquals(3, snapshot.chunks.get(0).x());
 		assertEquals(-2, snapshot.chunks.get(0).z());

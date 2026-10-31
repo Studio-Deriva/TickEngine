@@ -60,11 +60,25 @@ final class NetworkWindow {
 			sources.computeIfAbsent(share.source(), key -> new SourceStats()).addPacket(part);
 			if (share.chunk() != null) {
 				ChunkStats chunk = chunks.computeIfAbsent(share.chunk(), key -> new ChunkStats());
-				chunk.addPacket(part);
+				chunk.rawBytes.add(part);
+				// A packet split by block is one packet for its chunk, however many blocks it carries.
+				if (firstShareInChunk(shares, i)) {
+					chunk.packets.increment();
+				}
 				chunk.spot = share.spot();
 			}
 		}
 		return new Pending(this, type, shares, totalWeight);
+	}
+
+	/** Whether no share before {@code index} is about the same chunk. */
+	private static boolean firstShareInChunk(Share[] shares, int index) {
+		for (int i = 0; i < index; i++) {
+			if (shares[index].chunk().equals(shares[i].chunk())) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	void recordWire(Pending pending, long wire) {

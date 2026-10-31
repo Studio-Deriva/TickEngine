@@ -12,6 +12,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.LevelHeightAccessor;
 //? if >=1.21.2
 import net.minecraft.world.entity.EntitySpawnReason;
@@ -120,6 +122,18 @@ public final class MinecraftCompat {
 		return EntityType.loadEntityRecursive(tag, level, EntitySpawnReason.LOAD, entity -> entity);
 		//?} else {
 		/*return EntityType.loadEntityRecursive(tag, level, entity -> entity);
+		*///?}
+	}
+
+	/**
+	 * Whether the item in this slot always drops: vanilla marks so what a mob picked up or was
+	 * equipped with by a dispenser, unlike the equipment it spawned with.
+	 */
+	public static boolean isGuaranteedDrop(Mob mob, EquipmentSlot slot) {
+		//? if >=1.21.5 {
+		return mob.getDropChances().byEquipment(slot) > 1.0F;
+		//?} else {
+		/*return ((com.studioderiva.tickengine.mixin.MobDropChanceInvoker) mob).tickengine$getEquipmentDropChance(slot) > 1.0F;
 		*///?}
 	}
 

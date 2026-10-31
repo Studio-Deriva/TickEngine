@@ -11,10 +11,12 @@
 		"LevelMixin",
 		"LivingEntityAccessor",
 		"LivingEntityStackMixin",
+		"MobConversionMixin",
+		"MobDropChanceInvoker",
 		"MobMixin",
-		"MobStackMixin",
 		"NaturalSpawnerMixin",
 		"PacketEncoderMixin",
+		"PlayerStackMixin",
 		"ServerEntityMixin",
 		"ServerLevelMixin",
 		"TrackedEntityMixin"

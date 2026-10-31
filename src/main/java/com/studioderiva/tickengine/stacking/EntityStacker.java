@@ -16,10 +16,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.regex.Pattern;
 import net.fabricmc.fabric.api.tag.convention.v2.ConventionalEntityTypeTags;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -28,10 +30,13 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.npc.InventoryCarrier;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Entity stacking: mobs of the same kind standing close together become one mob that counts
@@ -51,6 +56,9 @@ import net.minecraft.world.entity.animal.Animal;
  *   to one mob: the rest moves to a copy first ({@link #afterInteract}).</li>
  *   <li>Natural spawning counts a stack as all its mobs ({@link #expandStacks}), so the mob cap and
  *   mob farms work as without stacking.</li>
+ *   <li>What a stack picks up (an item, a block for an enderman) belongs to one mob: the copies made
+ *   from a stack never carry it ({@link #dropAcquired}), and mobs already holding such things never
+ *   stack, since they would then hold one for all of them.</li>
  * </ul>
  * Server thread only.
  */
@@ -63,8 +71,13 @@ public final class EntityStacker {
 		"CustomName", "CustomNameVisible", "Tags", "Brain", "attributes", "Attributes", "LeftHanded", "CanPickUpLoot",
 		"Age", "InLove", "LoveCause", "love_cause", "active_effects", "ActiveEffects", "sleeping_pos", "SleepingX",
 		"SleepingY", "SleepingZ", "id");
-	/** Data that keeps a mob out of stacking: it belongs to someone or is tied to something. */
-	private static final Set<String> BLOCKING_KEYS = Set.of("Owner", "leash", "Leash", "Passengers");
+	/**
+	 * Data that keeps a mob out of stacking: it belongs to someone, is tied to something, or is a
+	 * block an enderman picked up (see {@link #holdsAcquiredItems} for items).
+	 */
+	private static final Set<String> BLOCKING_KEYS = Set.of("Owner", "leash", "Leash", "Passengers", "carriedBlockState");
+	/** The name {@link #stackName} gives, as it reads: " x7" after the translated type name. */
+	private static final Pattern STACK_NAME_COUNT = Pattern.compile(" x\\d+");
 	/** Time spent merging per tick, so a big entity count never makes a long tick. */
 	private static final long BUDGET_NANOS = 500_000;
 	private static final long EMERGENCY_BUDGET_NANOS = 3_000_000;
@@ -120,7 +133,6 @@ public final class EntityStacker {
 
 	/** Sets the count, its tag and its name. A count of 1 makes it a normal mob again. */
 	public static void setCount(Mob mob, int count) {
-		int previous = count(mob);
 		for (String tag : new ArrayList<>(mob.getTags())) {
 			if (tag.startsWith(TAG_PREFIX)) {
 				mob.removeTag(tag);
@@ -130,8 +142,9 @@ public final class EntityStacker {
 			mob.addTag(TAG_PREFIX + count);
 			mob.setCustomName(stackName(mob.getType(), count));
 			mob.setCustomNameVisible(TickEngineConfig.stackAlwaysShowCount);
-		} else if (previous > 1 && stackName(mob.getType(), previous).equals(mob.getCustomName())) {
-			// Only our own name goes: a name tag used on the mob just now stays.
+		} else if (isStackName(mob.getCustomName())) {
+			// Only our own name goes: a name tag used on the mob just now stays. Checked by its shape
+			// rather than its type, since a converted mob keeps the name of what it was.
 			mob.setCustomName(null);
 			mob.setCustomNameVisible(false);
 		}
@@ -139,6 +152,12 @@ public final class EntityStacker {
 
 	static Component stackName(EntityType<?> type, int count) {
 		return Component.translatable(type.getDescriptionId()).append(Component.literal(" x" + count));
+	}
+
+	/** A name made by {@link #stackName}; a name tag or a command gives other names. */
+	static boolean isStackName(Component name) {
+		return name != null && name.getContents() instanceof TranslatableContents && name.getSiblings().size() == 1
+			&& STACK_NAME_COUNT.matcher(name.getSiblings().get(0).getString()).matches();
 	}
 
 	// --- merging ---
@@ -186,7 +205,14 @@ public final class EntityStacker {
 		Map<CubeKey, List<Mob>> cubes = new HashMap<>();
 		for (ServerLevel level : server.getAllLevels()) {
 			for (Entity entity : level.getAllEntities()) {
-				if (entity instanceof Mob mob && count(mob) < TickEngineConfig.stackMaxSize && canStack(mob)) {
+				if (!(entity instanceof Mob mob)) {
+					continue;
+				}
+				if (mob.hasCustomName() && !isStack(mob) && isStackName(mob.getCustomName())) {
+					// A single mob still named like a stack (released from a bucket, for example): the name goes.
+					setCount(mob, 1);
+				}
+				if (count(mob) < TickEngineConfig.stackMaxSize && canStack(mob)) {
 					CubeKey key = new CubeKey(level, mob.getType(), Math.floorDiv(mob.getBlockX() + offset, size),
 						Math.floorDiv(mob.getBlockY() + offset, size), Math.floorDiv(mob.getBlockZ() + offset, size));
 					cubes.computeIfAbsent(key, k -> new ArrayList<>()).add(mob);
@@ -214,7 +240,7 @@ public final class EntityStacker {
 		void mergeNext() {
 			Mob mob = mobs.get(next++);
 			// Checked again: ticks went by since the round started.
-			if (count(mob) >= TickEngineConfig.stackMaxSize || !canStack(mob)) {
+			if (count(mob) >= TickEngineConfig.stackMaxSize || !canStack(mob) || holdsAcquiredItems(mob)) {
 				return;
 			}
 			CompoundTag signature = signature(mob);
@@ -261,6 +287,35 @@ public final class EntityStacker {
 			return false;
 		}
 		return !isExcluded(mob.getType());
+	}
+
+	/**
+	 * Items a mob picked up or was given: equipment that always drops (vanilla marks picked-up and
+	 * dispensed items so), or an inventory (piglins, allays, pillagers). One of them belongs to one mob,
+	 * so a stack must never start out holding them.
+	 */
+	private static boolean holdsAcquiredItems(Mob mob) {
+		for (EquipmentSlot slot : EquipmentSlot.values()) {
+			if (!mob.getItemBySlot(slot).isEmpty() && MinecraftCompat.isGuaranteedDrop(mob, slot)) {
+				return true;
+			}
+		}
+		return mob instanceof InventoryCarrier carrier && !carrier.getInventory().isEmpty();
+	}
+
+	/**
+	 * Takes from a copy made from a stack what the stack picked up: one mob picked it up, and that one
+	 * keeps it. Stacks never start out holding such things (see {@link #holdsAcquiredItems}).
+	 */
+	private static void dropAcquired(Mob copy) {
+		for (EquipmentSlot slot : EquipmentSlot.values()) {
+			if (!copy.getItemBySlot(slot).isEmpty() && MinecraftCompat.isGuaranteedDrop(copy, slot)) {
+				copy.setItemSlot(slot, ItemStack.EMPTY);
+			}
+		}
+		if (copy instanceof InventoryCarrier carrier) {
+			carrier.getInventory().clearContent();
+		}
 	}
 
 	private static boolean isExcluded(EntityType<?> type) {
@@ -330,21 +385,41 @@ public final class EntityStacker {
 		setCount(mob, 1);
 	}
 
-	/** Before {@code Mob.interact}: remembers a stack a player is using. */
+	/** Before {@code Player.interactOn}: remembers a stack a player is using. */
 	public static void beforeInteract(Mob mob) {
 		if (mob.level() instanceof ServerLevel && count(mob) > 1) {
 			remember(mob);
 		}
 	}
 
-	/** After {@code Mob.interact}: if it did something, it did it to one mob and the rest moves to a copy. */
+	/**
+	 * After {@code Player.interactOn}: if it did something, it did it to one mob and the rest moves to a
+	 * copy. Also when the mob is gone: a bucket took one fish, or shearing turned one mooshroom into a cow.
+	 */
 	public static void afterInteract(Mob mob, InteractionResult result) {
 		Pending before = pending.remove(mob);
-		if (before == null || result == null || !result.consumesAction() || mob.isRemoved()) {
+		if (before == null || result == null || !result.consumesAction()) {
 			return;
 		}
 		spawnRest(mob, before.data(), before.count() - 1);
-		setCount(mob, 1);
+		if (!mob.isRemoved()) {
+			setCount(mob, 1);
+		}
+	}
+
+	/**
+	 * After {@code Mob.convertTo}: a stack that turns into another mob (a zombie drowning, a pig struck by
+	 * lightning) stays a stack with the same count and gets the new mob's name. One that converts while a
+	 * player uses it (shearing a mooshroom) or while it dies is one mob: the rest stays as it was.
+	 */
+	public static void afterConversion(Mob from, Mob to) {
+		if (to == null || !(from.level() instanceof ServerLevel)) {
+			return;
+		}
+		int count = count(from);
+		if (count > 1) {
+			setCount(to, pending.containsKey(from) ? 1 : count);
+		}
 	}
 
 	private record Pending(int count, CompoundTag data) {
@@ -360,6 +435,7 @@ public final class EntityStacker {
 			return;
 		}
 		data.remove("UUID");
+		data.remove("carriedBlockState");
 		Entity copy = MinecraftCompat.loadEntity(data, level);
 		if (!(copy instanceof Mob rest)) {
 			if (!loadErrorLogged) {
@@ -370,6 +446,7 @@ public final class EntityStacker {
 			}
 			return;
 		}
+		dropAcquired(rest);
 		setCount(rest, count);
 		level.addFreshEntity(rest);
 	}
