@@ -3,6 +3,7 @@ package com.studioderiva.tickengine;
 import com.studioderiva.tickengine.command.TickEngineCommand;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.network.NetworkProfiler;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.permission.TickEnginePermissions;
 import com.studioderiva.tickengine.profiler.TickProfiler;
@@ -46,6 +47,7 @@ public final class TickEngine {
 				EmergencyMode.onTickStart();
 			} else {
 				TickProfiler.onTickEnd(event.getServer());
+				NetworkProfiler.onTickEnd();
 				BlockEntityThrottle.onTickEnd();
 				EntityThrottle.onTickEnd();
 				ServerCoreCompat.tick();
@@ -64,6 +66,7 @@ public final class TickEngine {
 		});
 		bus.addListener((ServerStoppedEvent event) -> {
 			TickProfiler.reset();
+			NetworkProfiler.reset();
 			BlockEntityThrottle.reset();
 			EntityThrottle.reset();
 			EntityStacker.reset();

@@ -41,6 +41,10 @@ see [Compatibility](#compatibility)).
 - **Detailed sessions and HTML reports.** `/tickengine profile start` measures every tick for a while,
   then prints the ranking and writes a self-contained HTML report (light and dark theme). Reports are
   written off the server thread, so a slow disk never causes lag.
+- **Network profiler.** `/tickengine network start` measures every packet the server sends for a while
+  and shows which mods, entities, blocks, block entities, mod channels, sounds, particles and chunks
+  send the most, with sizes before and after compression. Useful to find the mod or the farm that eats
+  the upload of a home server.
 - **Block entity throttling.** Block entities far from every player — vanilla or modded — tick once
   every N ticks: a far furnace smelts at 1/4 speed and costs about 1/4 of the CPU.
 - **Entity and AI throttling.** Three zones around the nearest player: everything normal close by, AI
@@ -95,6 +99,33 @@ Install it on the **server only**. Players don't need it, and it does nothing on
   (`profiler.maxSessionSeconds`, default 600).
 - Time is grouped by mod (the namespace of the type) and by type. Work a mod adds to vanilla code
   through mixins is counted under the vanilla type it runs in.
+
+## How the network profiler works
+
+`/tickengine network start [seconds]` (default 60, at most `profiler.maxSessionSeconds`) measures every
+packet the server sends until the time is up or `/tickengine network stop`, then prints the ranking and
+writes an HTML report (`tickengine-network-<time>.html`). When no session runs it costs one boolean
+check per packet.
+
+- **Sizes.** Each packet is measured where vanilla encodes it and again after compression, so you see
+  both the raw size and what actually goes on the wire (with the length in front of each packet; small
+  packets are not compressed, so they show a byte or two more sent than raw). Behind a proxy that turns compression off on the
+  backend (`network-compression-threshold=-1`), both are the same. With a mod that replaces vanilla
+  compression with its own the compressed size cannot be seen: the results say so, and show
+  the raw size for those packets.
+- **Sources.** A packet is charged to what it is about: the entity type of an entity packet (movement,
+  data, equipment, spawn), the block of a block update (a packet changing several blocks is split by how
+  many of each it carries), the block entity type, the channel of a mod's own packet, the sound or the
+  particle. Chunk and light data count as "Chunks and light"; everything else (player movement, chat,
+  inventory...) by its packet type.
+- **Mods.** A source belongs to the mod that registered it (its namespace). A vanilla mob spawned by a
+  modded farm counts as Minecraft; the **chunk** list shows where the traffic comes from instead, with a
+  click to teleport there.
+- **On 1.20.1** packets have no names of their own, so packet types are shown by class name
+  (`ClientboundMoveEntityPacket.Pos`). Forge's own login handshake (`fml:handshake`) and mods that
+  ask the client something while it logs in count as channels too.
+- **Per player.** Sizes add up what all players received: a cow seen by three players counts three
+  times, because it costs three times the upload.
 
 ## How block entity throttling works
 
@@ -305,6 +336,9 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine profile start [seconds]` | Detailed session: measures every tick, then prints results and writes an HTML report |
 | `/tickengine profile stop` | Stop the session early |
 | `/tickengine profile report` | HTML report from the light profiler |
+| `/tickengine network` | Network profiler: whether a session runs, the last result |
+| `/tickengine network start [seconds]` / `stop` | Measure every packet sent for a while, then print results and write an HTML report |
+| `/tickengine network top [mods\|sources\|packets\|chunks]` / `report` | Show the last network result again, or write its HTML report again. Click a chunk to teleport there. |
 | `/tickengine config list\|get\|set\|reload` | Read and change settings live; changes are saved to the file |
 | `/tickengine rules blockentities list` | Show block entity rules |
 | `/tickengine rules blockentities set <interval> <target>` | Rule for a type (`minecraft:hopper`) or a whole mod (`create:*`); interval 1 = never throttle |
@@ -331,7 +365,7 @@ overwritten: the settings in use are kept and the command tells you.
 Without a permissions mod, commands need operator level `permissions.commandOpLevel` (default 3).
 With a permissions mod that uses Forge's PermissionAPI (tested with LuckPerms for Forge 5.4.102,
 which registers itself as the permission handler) use these nodes:
-`tickengine.status`, `tickengine.top`, `tickengine.profile`, `tickengine.config`, and
+`tickengine.status`, `tickengine.top`, `tickengine.profile` (also the network profiler), `tickengine.config`, and
 `tickengine.notify` for admin notices (auto-tuning changes, the ServerCore notices below).
 
 ## Compatibility

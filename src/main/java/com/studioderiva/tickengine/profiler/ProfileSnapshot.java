@@ -88,9 +88,16 @@ public final class ProfileSnapshot {
 		return mods;
 	}
 
-	/** Registry namespaces usually match the mod id; fall back to the namespace when they do not. */
-	private static String modName(String namespace) {
-		return ModList.get().getModContainerById(namespace)
+	/**
+	 * Registry namespaces usually match the mod id; fall back to the namespace when they do not, or when
+	 * FML has not loaded mods (plain unit tests).
+	 */
+	public static String modName(String namespace) {
+		ModList mods = ModList.get();
+		if (mods == null) {
+			return namespace;
+		}
+		return mods.getModContainerById(namespace)
 			.map(container -> container.getModInfo().getDisplayName())
 			.orElse(namespace);
 	}

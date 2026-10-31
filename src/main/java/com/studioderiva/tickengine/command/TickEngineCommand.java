@@ -11,10 +11,14 @@ import com.studioderiva.tickengine.TickEngine;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.network.NetworkProfiler;
+import com.studioderiva.tickengine.network.NetworkSnapshot;
+import com.studioderiva.tickengine.network.NetworkSource;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.report.HtmlReport;
+import com.studioderiva.tickengine.report.NetworkHtmlReport;
 import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
@@ -43,6 +47,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.server.permission.nodes.PermissionNode;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * {@code /tickengine} command tree.
@@ -51,6 +56,7 @@ import net.minecraftforge.server.permission.nodes.PermissionNode;
  * /tickengine status
  * /tickengine top [mods|blockentities|entities]
  * /tickengine profile start [seconds] | stop | report
+ * /tickengine network [start [seconds] | stop | top [mods|sources|packets|chunks] | report]
  * /tickengine config list | get &lt;key&gt; | set &lt;key&gt; &lt;value&gt; | reload
  * /tickengine rules blockentities list | set &lt;interval&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;interval&gt; &lt;target&gt;
  *                                  | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
@@ -94,6 +100,21 @@ public final class TickEngineCommand {
 						.executes(context -> startSession(context, IntegerArgumentType.getInteger(context, "seconds")))))
 				.then(Commands.literal("stop").executes(TickEngineCommand::stopSession))
 				.then(Commands.literal("report").executes(TickEngineCommand::lightReport)))
+			.then(Commands.literal("network")
+				.requires(permission("profile"))
+				.executes(TickEngineCommand::networkStatus)
+				.then(Commands.literal("start")
+					.executes(context -> networkStart(context, DEFAULT_SESSION_SECONDS))
+					.then(Commands.argument("seconds", IntegerArgumentType.integer(5))
+						.executes(context -> networkStart(context, IntegerArgumentType.getInteger(context, "seconds")))))
+				.then(Commands.literal("stop").executes(TickEngineCommand::networkStop))
+				.then(Commands.literal("top")
+					.executes(context -> networkTop(context, NetworkView.ALL))
+					.then(Commands.literal("mods").executes(context -> networkTop(context, NetworkView.MODS)))
+					.then(Commands.literal("sources").executes(context -> networkTop(context, NetworkView.SOURCES)))
+					.then(Commands.literal("packets").executes(context -> networkTop(context, NetworkView.PACKETS)))
+					.then(Commands.literal("chunks").executes(context -> networkTop(context, NetworkView.CHUNKS))))
+				.then(Commands.literal("report").executes(TickEngineCommand::networkReport)))
 			.then(Commands.literal("config")
 				.requires(permission("config"))
 				.then(Commands.literal("list").executes(TickEngineCommand::configList))
@@ -874,6 +895,206 @@ public final class TickEngineCommand {
 		HtmlReport.writeAsync(server, snapshot).whenComplete((file, error) -> server.execute(() -> {
 			if (error != null) {
 				TickEngine.LOGGER.error("Could not write HTML report", error);
+				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
+			} else {
+				String path = server.getServerDirectory().toPath().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
+				source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
+					.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
+			}
+		}));
+	}
+
+	// --- network ---
+
+	private enum NetworkView { ALL, MODS, SOURCES, PACKETS, CHUNKS }
+
+	private static int networkStatus(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Network profiler"), false);
+		source.sendSuccess(() -> line("Session", NetworkProfiler.isSessionRunning()
+			? "running, " + NetworkProfiler.sessionSecondsLeft() + " s left" : "not running",
+			NetworkProfiler.isSessionRunning() ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		NetworkSnapshot last = NetworkProfiler.lastSnapshot();
+		source.sendSuccess(() -> line("Last result", last == null ? "none"
+			: NetworkSnapshot.formatBytes(last.perSecond(last.wireBytes)) + "/s over " + last.durationMillis / 1000 + " s",
+			ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> Component.literal(" Measures what the server sends to players, by mod, entity, block, "
+			+ "channel and chunk. Start with '/tickengine network start [seconds]'.").withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static int networkStart(CommandContext<CommandSourceStack> context, int seconds) {
+		CommandSourceStack source = context.getSource();
+		if (seconds > TickEngineConfig.maxSessionSeconds) {
+			source.sendFailure(Component.literal("Maximum session length is " + TickEngineConfig.maxSessionSeconds
+				+ " s (config: profiler.maxSessionSeconds)."));
+			return 0;
+		}
+		MinecraftServer server = source.getServer();
+		if (!NetworkProfiler.startSession(seconds, result -> finishNetworkSession(server, source, result))) {
+			source.sendFailure(Component.literal("A network session is already running ("
+				+ NetworkProfiler.sessionSecondsLeft() + " s left). Use '/tickengine network stop'."));
+			return 0;
+		}
+		source.sendSuccess(() -> Component.literal("Network profiling started for " + seconds
+			+ " s. Every packet sent to players is measured; results and an HTML report follow when it ends.")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int networkStop(CommandContext<CommandSourceStack> context) {
+		if (!NetworkProfiler.stopSession()) {
+			context.getSource().sendFailure(Component.literal("No network session is running."));
+			return 0;
+		}
+		return 1;
+	}
+
+	private static void finishNetworkSession(MinecraftServer server, CommandSourceStack source, NetworkSnapshot result) {
+		if (result.isEmpty()) {
+			source.sendFailure(Component.literal("The network session ended without any packet sent. "
+				+ "Is a player online?"));
+			return;
+		}
+		printNetwork(source, result, NetworkView.ALL);
+		writeNetworkReport(server, source, result);
+	}
+
+	private static NetworkSnapshot lastNetworkSnapshot(CommandSourceStack source) {
+		NetworkSnapshot snapshot = NetworkProfiler.lastSnapshot();
+		if (snapshot == null || snapshot.isEmpty()) {
+			source.sendFailure(Component.literal("No network results yet. Run '/tickengine network start [seconds]' first."));
+			return null;
+		}
+		return snapshot;
+	}
+
+	private static int networkTop(CommandContext<CommandSourceStack> context, NetworkView view) {
+		NetworkSnapshot snapshot = lastNetworkSnapshot(context.getSource());
+		if (snapshot == null) {
+			return 0;
+		}
+		printNetwork(context.getSource(), snapshot, view);
+		return 1;
+	}
+
+	private static int networkReport(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		NetworkSnapshot snapshot = lastNetworkSnapshot(source);
+		if (snapshot == null) {
+			return 0;
+		}
+		writeNetworkReport(source.getServer(), source, snapshot);
+		return 1;
+	}
+
+	private static void printNetwork(CommandSourceStack source, NetworkSnapshot snapshot, NetworkView view) {
+		source.sendSuccess(() -> header(snapshot.label)
+			.append(Component.literal(" (" + snapshot.durationMillis / 1000 + " s, "
+				+ NetworkSnapshot.formatBytes(snapshot.perSecond(snapshot.wireBytes)) + "/s sent, "
+				+ format(snapshot.perSecond(snapshot.packets)) + " packets/s, compression saved "
+				+ format(snapshot.compressionSaving()) + "%)").withStyle(ChatFormatting.GRAY)), false);
+		if (snapshot.compressionUnmeasured > 0) {
+			source.sendSuccess(() -> Component.literal(" Another mod compresses the packets (" + snapshot.compressionUnmeasured
+				+ " of them): their sent size is shown before compression.").withStyle(ChatFormatting.YELLOW), false);
+		}
+		int limit = TickEngineConfig.chatTopEntries;
+		if (view == NetworkView.ALL || view == NetworkView.MODS) {
+			title(source, "Mods");
+			List<NetworkSnapshot.ModEntry> mods = snapshot.mods();
+			for (int i = 0; i < Math.min(limit, mods.size()); i++) {
+				NetworkSnapshot.ModEntry mod = mods.get(i);
+				rankLine(source, i, Component.literal(mod.displayName()).withStyle(ChatFormatting.WHITE), snapshot,
+					mod.wireBytes());
+			}
+		}
+		if (view == NetworkView.ALL || view == NetworkView.SOURCES) {
+			title(source, "Sources");
+			for (int i = 0; i < Math.min(limit, snapshot.sources.size()); i++) {
+				NetworkSnapshot.SourceEntry entry = snapshot.sources.get(i);
+				StringBuilder hover = new StringBuilder(entry.source().kind().displayName).append(", ")
+					.append(format(snapshot.perSecond(entry.packets()))).append(" packets/s\nMostly as:");
+				entry.topPackets().forEach(share -> hover.append("\n ").append(share.packet()).append("  ")
+					.append(format(entry.wireBytes() == 0 ? 0 : share.wireBytes() * 100.0 / entry.wireBytes())).append('%'));
+				MutableComponent name = Component.literal(entry.source().id()).withStyle(style -> style
+					.withColor(ChatFormatting.WHITE)
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(hover.toString()))));
+				rankLine(source, i, Component.literal(kindTag(entry.source().kind())).withStyle(ChatFormatting.DARK_GRAY)
+					.append(name), snapshot, entry.wireBytes());
+			}
+		}
+		if (view == NetworkView.ALL || view == NetworkView.PACKETS) {
+			title(source, "Packet types");
+			for (int i = 0; i < Math.min(limit, snapshot.packetTypes.size()); i++) {
+				NetworkSnapshot.PacketEntry entry = snapshot.packetTypes.get(i);
+				rankLine(source, i, Component.literal(entry.id()).withStyle(ChatFormatting.WHITE), snapshot, entry.wireBytes());
+			}
+		}
+		if (view == NetworkView.ALL || view == NetworkView.CHUNKS) {
+			title(source, "Chunks");
+			if (snapshot.chunks.isEmpty()) {
+				source.sendSuccess(() -> Component.literal("  no data").withStyle(ChatFormatting.GRAY), false);
+			}
+			for (int i = 0; i < Math.min(limit, snapshot.chunks.size()); i++) {
+				NetworkSnapshot.ChunkEntry entry = snapshot.chunks.get(i);
+				String dimension = entry.dimension().location().toString();
+				ServerLevel level = source.getServer().getLevel(entry.dimension());
+				// Go where the traffic happens; the chunk center can be outside a small farm or underground.
+				NetworkSnapshot.Spot spot = entry.spot();
+				int x = spot != null ? spot.x() : entry.x() * 16 + 8;
+				int z = spot != null ? spot.z() : entry.z() * 16 + 8;
+				// Reading blocks of an unloaded chunk would load it; keep the player's height then.
+				String y;
+				if (level == null || !level.hasChunk(entry.x(), entry.z())) {
+					y = spot != null ? Integer.toString(spot.y()) : "~";
+				} else if (spot != null) {
+					y = Integer.toString(landingY(level, new BlockPos(x, spot.y(), z)));
+				} else {
+					y = Integer.toString(level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z));
+				}
+				String top = entry.topSource() == null ? "" : "\nMostly: " + entry.topSource().label();
+				MutableComponent name = Component.literal(dimension + " " + x + " " + z).withStyle(style -> style
+					.withColor(ChatFormatting.WHITE)
+					.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,
+						"/execute in " + dimension + " run tp @s " + x + " " + y + " " + z))
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Chunk " + entry.x() + ", "
+						+ entry.z() + top + "\nClick to teleport")))
+					.withUnderlined(true));
+				rankLine(source, i, name, snapshot, entry.wireBytes());
+			}
+		}
+	}
+
+	private static String kindTag(NetworkSource.Kind kind) {
+		return switch (kind) {
+			case ENTITY -> "entity ";
+			case BLOCK_ENTITY -> "block entity ";
+			case BLOCK -> "block ";
+			case CHANNEL -> "channel ";
+			case SOUND -> "sound ";
+			case PARTICLE -> "particle ";
+			case WORLD -> "world ";
+			case OTHER -> "packet ";
+		};
+	}
+
+	private static void title(CommandSourceStack source, String title) {
+		source.sendSuccess(() -> Component.literal(title).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
+	}
+
+	private static void rankLine(CommandSourceStack source, int index, MutableComponent name, NetworkSnapshot snapshot, long wire) {
+		double percent = snapshot.percent(wire);
+		source.sendSuccess(() -> Component.literal(" " + (index + 1) + ". ").withStyle(ChatFormatting.GRAY)
+			.append(name)
+			.append(Component.literal("  " + NetworkSnapshot.formatBytes(snapshot.perSecond(wire)) + "/s")
+				.withStyle(percent >= 20 ? ChatFormatting.RED : percent >= 5 ? ChatFormatting.YELLOW : ChatFormatting.GREEN))
+			.append(Component.literal(" (" + format(percent) + "%)").withStyle(ChatFormatting.GRAY)), false);
+	}
+
+	private static void writeNetworkReport(MinecraftServer server, CommandSourceStack source, NetworkSnapshot snapshot) {
+		NetworkHtmlReport.writeAsync(server, snapshot).whenComplete((file, error) -> server.execute(() -> {
+			if (error != null) {
+				TickEngine.LOGGER.error("Could not write the network HTML report", error);
 				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
 			} else {
 				String path = server.getServerDirectory().toPath().toAbsolutePath().relativize(file.toAbsolutePath()).toString();

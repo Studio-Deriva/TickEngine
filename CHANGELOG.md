@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.7+1.20.1-forge
+
+- **Network profiler** (`/tickengine network start [seconds]`), as in the Fabric version's 1.0.0-beta.7.
+  Measures every packet the server sends during a session and ranks mods, sources (entity types, blocks,
+  block entities, mod channels, sounds, particles), packet types and chunks by upload, before and after
+  compression. Results in chat (click a chunk to teleport) and in an HTML report. Needs
+  `tickengine.profile`. No cost when no session runs. On 1.20.1 packet types are named after their class,
+  and Forge's login handshake counts as a channel.
+- Tested on a Forge 1.20.1 dev server with a client: entities, blocks, block entities, sounds,
+  particles, chunks and Forge's login handshake (`fml:loginwrapper`).
+
+## 1.0.0-beta.6+1.20.1-forge
 
 As in the Fabric version's 1.0.0-beta.6 (without `/tickengine report`, which stays Fabric only):
 
