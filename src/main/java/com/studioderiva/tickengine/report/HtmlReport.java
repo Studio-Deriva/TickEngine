@@ -19,11 +19,11 @@ import net.minecraft.util.Util;
 
 /** Writes a self-contained HTML report (no external files or scripts) for a profile snapshot. */
 public final class HtmlReport {
-	private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
+	static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
 		.withZone(ZoneId.systemDefault());
-	private static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+	static final DateTimeFormatter DISPLAY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 		.withZone(ZoneId.systemDefault());
-	private static final int MAX_ROWS = 100;
+	static final int MAX_ROWS = 100;
 
 	private HtmlReport() {
 	}
@@ -33,7 +33,15 @@ public final class HtmlReport {
 	 * disk never stalls a tick. The future completes off the server thread.
 	 */
 	public static CompletableFuture<Path> writeAsync(MinecraftServer server, ProfileSnapshot snapshot) {
-		String html = render(server, snapshot);
+		return write(server, "tickengine-" + FILE_TIME.format(Instant.ofEpochMilli(snapshot.startMillis)) + ".html",
+			render(server, snapshot));
+	}
+
+	/**
+	 * Writes an already rendered page on the IO pool, so a slow disk never stalls a tick. The future
+	 * completes off the server thread.
+	 */
+	static CompletableFuture<Path> write(MinecraftServer server, String fileName, String html) {
 		Path serverDirectory = server.getServerDirectory().toAbsolutePath().normalize();
 		Path directory = serverDirectory.resolve(TickEngineConfig.reportDirectory).normalize();
 		if (!directory.startsWith(serverDirectory)) {
@@ -41,7 +49,7 @@ public final class HtmlReport {
 			return CompletableFuture.failedFuture(new IOException("Report directory is outside the server folder: "
 				+ TickEngineConfig.reportDirectory));
 		}
-		Path file = directory.resolve("tickengine-" + FILE_TIME.format(Instant.ofEpochMilli(snapshot.startMillis)) + ".html");
+		Path file = directory.resolve(fileName);
 		return CompletableFuture.supplyAsync(() -> {
 			try {
 				Files.createDirectories(directory);
@@ -55,45 +63,7 @@ public final class HtmlReport {
 
 	static String render(MinecraftServer server, ProfileSnapshot snapshot) {
 		StringBuilder html = new StringBuilder(32_768);
-		html.append("""
-			<!doctype html>
-			<html lang="en">
-			<head>
-			<meta charset="utf-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1">
-			<title>TickEngine report</title>
-			<style>
-			:root { --bg: #f7f7f5; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e3e0;
-			  --bar: #3b6fd8; --bar-bg: #e8eefb; }
-			@media (prefers-color-scheme: dark) {
-			  :root { --bg: #161618; --card: #1f1f22; --text: #f2f2f2; --muted: #a1a1a6; --line: #333338;
-			    --bar: #6e9bff; --bar-bg: #26304a; }
-			}
-			* { box-sizing: border-box; }
-			body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
-			  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-			main { max-width: 1100px; margin: 0 auto; }
-			h1 { font-size: 24px; margin: 0 0 4px; }
-			h2 { font-size: 17px; margin: 32px 0 8px; }
-			.muted { color: var(--muted); }
-			.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
-			.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-			.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
-			.table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
-			table { width: 100%; border-collapse: collapse; }
-			th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
-			th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
-			tr:last-child td { border-bottom: none; }
-			td.num { text-align: right; font-variant-numeric: tabular-nums; }
-			.bar { position: relative; min-width: 120px; height: 8px; background: var(--bar-bg); border-radius: 4px; }
-			.bar span { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 4px; }
-			code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-			footer { margin-top: 32px; font-size: 12px; }
-			</style>
-			</head>
-			<body>
-			<main>
-			""");
+		head(html, "TickEngine report");
 		html.append("<h1>TickEngine report</h1>\n");
 		html.append("<div class=\"muted\">").append(escape(snapshot.label)).append(" &middot; started ")
 			.append(DISPLAY_TIME.format(Instant.ofEpochMilli(snapshot.startMillis))).append("</div>\n");
@@ -126,6 +96,49 @@ public final class HtmlReport {
 			</html>
 			""");
 		return html.toString();
+	}
+
+	/** Opens the document: head, shared styles and the start of the body. */
+	static void head(StringBuilder html, String title) {
+		html.append("""
+			<!doctype html>
+			<html lang="en">
+			<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>""").append(escape(title)).append("</title>\n").append("""
+			<style>
+			:root { --bg: #f7f7f5; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e3e0;
+			  --bar: #3b6fd8; --bar-bg: #e8eefb; }
+			@media (prefers-color-scheme: dark) {
+			  :root { --bg: #161618; --card: #1f1f22; --text: #f2f2f2; --muted: #a1a1a6; --line: #333338;
+			    --bar: #6e9bff; --bar-bg: #26304a; }
+			}
+			* { box-sizing: border-box; }
+			body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+			  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+			main { max-width: 1100px; margin: 0 auto; }
+			h1 { font-size: 24px; margin: 0 0 4px; }
+			h2 { font-size: 17px; margin: 32px 0 8px; }
+			.muted { color: var(--muted); }
+			.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
+			.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+			.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+			.table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+			th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+			tr:last-child td { border-bottom: none; }
+			td.num { text-align: right; font-variant-numeric: tabular-nums; }
+			.bar { position: relative; min-width: 120px; height: 8px; background: var(--bar-bg); border-radius: 4px; }
+			.bar span { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 4px; }
+			code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+			footer { margin-top: 32px; font-size: 12px; }
+			</style>
+			</head>
+			<body>
+			<main>
+			""");
 	}
 
 	private static void modTable(StringBuilder html, ProfileSnapshot snapshot, List<ProfileSnapshot.ModEntry> mods) {
@@ -174,27 +187,27 @@ public final class HtmlReport {
 		html.append("</table></div>\n");
 	}
 
-	private static void stat(StringBuilder html, String label, String value) {
+	static void stat(StringBuilder html, String label, String value) {
 		html.append("<div class=\"stat\"><span class=\"muted\">").append(escape(label)).append("</span><b>")
 			.append(escape(value)).append("</b></div>\n");
 	}
 
-	private static void bar(StringBuilder html, double value, double max) {
+	static void bar(StringBuilder html, double value, double max) {
 		double width = max <= 0 ? 0 : Math.min(100, value * 100 / max);
 		html.append("<div class=\"bar\"><span style=\"width:").append(String.format(Locale.ROOT, "%.1f", width))
 			.append("%\"></span></div>");
 	}
 
-	private static String formatSeconds(long millis) {
+	static String formatSeconds(long millis) {
 		long seconds = millis / 1000;
 		return seconds >= 60 ? seconds / 60 + " min " + seconds % 60 + " s" : seconds + " s";
 	}
 
-	private static String format(double value) {
+	static String format(double value) {
 		return String.format(Locale.ROOT, value >= 100 ? "%.0f" : value >= 10 ? "%.1f" : "%.2f", value);
 	}
 
-	private static String escape(String text) {
+	static String escape(String text) {
 		return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
 	}
 }

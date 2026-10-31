@@ -89,7 +89,7 @@ public final class ProfileSnapshot {
 	}
 
 	/** Registry namespaces usually match the mod id; fall back to the namespace when they do not. */
-	private static String modName(String namespace) {
+	public static String modName(String namespace) {
 		return FabricLoader.getInstance().getModContainer(namespace)
 			.map(container -> container.getMetadata().getName())
 			.orElse(namespace);

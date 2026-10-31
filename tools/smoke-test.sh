@@ -101,6 +101,15 @@ send 'damage @e[type=minecraft:cow,tag=tickengine.stack.3,limit=1] 100 minecraft
 send 'data get entity @e[type=minecraft:cow,tag=tickengine.stack.2,limit=1] CustomName' 1
 send 'kill @e[type=minecraft:cow]' 1
 send 'tickengine stacking mode off' 1
+# Network profiler: server list pings are real connections, so packets get encoded and measured.
+send 'tickengine network start 5' 1
+for _ in 1 2 3; do
+	python3 -I "$root/tools/status-ping.py" localhost 25565 >> "$out/ping.log" 2>&1 || echo "ping failed" >> "$out/ping.log"
+done
+sleep 6
+send 'tickengine network' 1
+send 'tickengine network top packets' 1
+send 'tickengine network top chunks' 1
 send 'tickengine status' 2
 stop_server
 trap - EXIT
@@ -142,6 +151,9 @@ check "emergency mode starts and raises auto-tuning" 'Auto-tuning level 0 -> [1-
 check "emergency mode ends and auto-tuning comes back" 'Auto-tuning level [1-9][0-9]* -> 0 \(emergency mode over\)'
 check "entity stacking merges cows (NBT save, tags, name)" 'Cow x3 has the following entity data'
 check "a stack loses one mob when it dies (die mixin, NBT load)" 'Cow x2 has the following entity data'
+check "network profiler measures packets (PacketEncoder mixin)" 'minecraft:status_response'
+check "network HTML report is written" 'HTML report saved: .*tickengine-network-'
+check "network status command" 'Last result.*/s over'
 check "server stops cleanly" 'Stopping server|All dimensions are saved'
 check_absent "no mixin errors" 'InvalidInjectionException|InjectionError|MixinApplyError|Mixin apply .*failed|Critical injection failure|@Shadow field .* was not located'
 check_absent "no missing classes or members" 'NoSuchMethodError|NoSuchFieldError|NoClassDefFoundError|ClassNotFoundException: (net\.minecraft|com\.studioderiva|me\.lucko)'

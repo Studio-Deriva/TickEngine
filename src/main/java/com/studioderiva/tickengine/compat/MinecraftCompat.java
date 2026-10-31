@@ -7,7 +7,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -118,6 +120,15 @@ public final class MinecraftCompat {
 		return EntityType.loadEntityRecursive(tag, level, EntitySpawnReason.LOAD, entity -> entity);
 		//?} else {
 		/*return EntityType.loadEntityRecursive(tag, level, entity -> entity);
+		*///?}
+	}
+
+	/** The id of a sound event, also for sounds sent by id rather than from the registry (/playsound). */
+	public static Identifier soundId(SoundEvent sound) {
+		//? if >=1.21.2 {
+		return sound.location();
+		//?} else {
+		/*return sound.getLocation();
 		*///?}
 	}
 }

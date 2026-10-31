@@ -4,6 +4,7 @@
 	"compatibilityLevel": "JAVA_21",
 	"server": [
 		"BoundTickingBlockEntityMixin",
+		"CompressionEncoderMixin",
 		"EntityInvoker",
 		"ExperienceOrbAccessor",
 		"ItemEntityAccessor",
@@ -13,7 +14,10 @@
 		"MobMixin",
 		"MobStackMixin",
 		"NaturalSpawnerMixin",
-		"ServerLevelMixin"
+		"PacketEncoderMixin",
+		"ServerEntityMixin",
+		"ServerLevelMixin",
+		"TrackedEntityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-beta.7
+
+- **Network profiler** (`/tickengine network start [seconds]`). Measures every packet the server sends
+  during a session and ranks mods, sources (entity types, blocks, block entities, mod channels, sounds,
+  particles), packet types and chunks by upload, before and after compression. Results in chat (click a
+  chunk to teleport) and in an HTML report. Needs `tickengine.profile`. No cost when no session runs.
+- Tested in game on 1.21.1, 1.21.6, 1.21.9 and 1.21.11 and with a Fabric modpack; the sent size matches
+  what the server process really sent within about 1%. `tools/smoke-test.sh` checks it on every version.
+
 ## 1.0.0-beta.6
 
 - **Emergency mode** (`/tickengine emergency`), off by default. When turned on and the average MSPT stays
