@@ -4,7 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
-/** Mutable timing totals for one block entity type or entity type. Server thread only. */
+/** Mutable timing totals for one type (block entity, entity, block, fluid or chunk work). Server thread only. */
 final class TypeStats {
 	long totalNanos;
 	long calls;
@@ -12,14 +12,15 @@ final class TypeStats {
 	BlockPos worstPos;
 	ResourceKey<Level> worstDimension;
 
+	/** {@code level} and {@code pos} may be null for work that has no single place, like chunk saving. */
 	void add(long nanos, Level level, BlockPos pos) {
 		totalNanos += nanos;
 		calls++;
 		if (nanos > worstNanos) {
 			worstNanos = nanos;
 			// BlockPos.MutableBlockPos instances can be reused by the caller.
-			worstPos = pos.immutable();
-			worstDimension = level.dimension();
+			worstPos = pos == null ? null : pos.immutable();
+			worstDimension = level == null ? null : level.dimension();
 		}
 	}
 }

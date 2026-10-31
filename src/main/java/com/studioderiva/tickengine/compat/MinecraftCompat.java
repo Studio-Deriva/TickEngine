@@ -3,11 +3,14 @@ package com.studioderiva.tickengine.compat;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.Entity;
@@ -134,6 +137,15 @@ public final class MinecraftCompat {
 		return mob.getDropChances().byEquipment(slot) > 1.0F;
 		//?} else {
 		/*return ((com.studioderiva.tickengine.mixin.MobDropChanceInvoker) mob).tickengine$getEquipmentDropChance(slot) > 1.0F;
+		*///?}
+	}
+
+	/** A registry of the server, such as the worldgen registries that are not built in. */
+	public static <T> Registry<T> registry(RegistryAccess registries, ResourceKey<? extends Registry<? extends T>> key) {
+		//? if >=1.21.2 {
+		return registries.lookupOrThrow(key);
+		//?} else {
+		/*return registries.registryOrThrow(key);
 		*///?}
 	}
 

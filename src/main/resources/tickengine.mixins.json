@@ -4,10 +4,14 @@
 	"compatibilityLevel": "JAVA_21",
 	"server": [
 		"BoundTickingBlockEntityMixin",
+		"ChunkDataReadMixin",
+		"ChunkMapMixin",
+		"ChunkTaskExecutorMixin",
 		"CompressionEncoderMixin",
 		"EntityInvoker",
 		"ExperienceOrbAccessor",
 		"ItemEntityAccessor",
+		"LevelChunkMixin",
 		"LevelMixin",
 		"LivingEntityAccessor",
 		"LivingEntityStackMixin",
@@ -16,9 +20,11 @@
 		"MobMixin",
 		"NaturalSpawnerMixin",
 		"PacketEncoderMixin",
+		"PlacedFeatureMixin",
 		"PlayerStackMixin",
 		"ServerEntityMixin",
 		"ServerLevelMixin",
+		"StructureStartMixin",
 		"TrackedEntityMixin"
 	],
 	"injectors": {

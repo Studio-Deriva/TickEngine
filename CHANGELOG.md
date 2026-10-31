@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0-beta.8
+
+- **Profiler: redstone, fluids, random ticks and block events.** The tick profiler now also times
+  scheduled block ticks (repeaters, comparators, observers, falling blocks: most redstone, including the
+  dust they power), fluid ticks (water and lava flowing), random ticks (crops, leaves, lava) and block
+  events (pistons, note blocks), per block or fluid, with the slowest place to teleport to. They count
+  toward their mod. `/tickengine top blocks`, and a Blocks section in the HTML report.
+- **Profiler: chunks and worldgen.** Server-thread time on loading, finishing, waiting for, unloading and
+  saving chunks (rows that add up, per sampled tick), chunk tasks between ticks, chunks loaded from disk,
+  started and finished generating, generated chunks by nearest player, and the time each feature and
+  structure takes on the worldgen threads, by mod. `/tickengine top chunks`, a Chunks section in the HTML
+  report and a line in `/tickengine report`.
+- Tested on the dev servers of 1.21.1, 1.21.5 and 1.21.11, with a player on 1.21.1 and 1.21.11.
+
 ## 1.0.0-beta.7
 
 - **Network profiler** (`/tickengine network start [seconds]`). Measures every packet the server sends

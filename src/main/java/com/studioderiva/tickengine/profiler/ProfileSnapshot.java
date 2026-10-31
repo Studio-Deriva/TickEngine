@@ -2,9 +2,11 @@ package com.studioderiva.tickengine.profiler;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -14,7 +16,17 @@ import net.minecraft.world.level.Level;
 public final class ProfileSnapshot {
 	public enum Category {
 		BLOCK_ENTITY("Block entity"),
-		ENTITY("Entity");
+		ENTITY("Entity"),
+		/** Scheduled block ticks: repeaters, comparators, observers, falling blocks, most redstone. */
+		BLOCK_TICK("Scheduled block tick"),
+		/** Scheduled fluid ticks: water and lava flowing. */
+		FLUID_TICK("Fluid tick"),
+		/** Random ticks: crops, saplings, leaves, ice, fire, lava setting fire. */
+		RANDOM_TICK("Random tick"),
+		/** Block events: pistons, note blocks, chests and bells opening. */
+		BLOCK_EVENT("Block event"),
+		/** Chunk work on the server thread, by kind ({@link ChunkWork}). Not a mod: left out of {@link #mods()}. */
+		CHUNK("Chunk work");
 
 		public final String displayName;
 
@@ -22,6 +34,10 @@ public final class ProfileSnapshot {
 			this.displayName = displayName;
 		}
 	}
+
+	/** The block categories, shown together as one ranking. */
+	public static final Set<Category> BLOCK_CATEGORIES =
+		EnumSet.of(Category.BLOCK_TICK, Category.FLUID_TICK, Category.RANDOM_TICK, Category.BLOCK_EVENT);
 
 	public record Entry(Category category, String id, String namespace, long totalNanos, long calls,
 		long worstNanos, BlockPos worstPos, ResourceKey<Level> worstDimension) {
@@ -37,9 +53,10 @@ public final class ProfileSnapshot {
 	public final long sampledTicks;
 	public final long sampledTickNanos;
 	public final List<Entry> entries;
+	public final ChunkActivity chunks;
 
 	ProfileSnapshot(String label, long startMillis, long durationMillis, long sampledTicks, long sampledTickNanos,
-		List<Entry> entries) {
+		List<Entry> entries, ChunkActivity chunks) {
 		this.label = label;
 		this.startMillis = startMillis;
 		this.durationMillis = durationMillis;
@@ -48,6 +65,7 @@ public final class ProfileSnapshot {
 		List<Entry> sorted = new ArrayList<>(entries);
 		sorted.sort(Comparator.comparingLong(Entry::totalNanos).reversed());
 		this.entries = List.copyOf(sorted);
+		this.chunks = chunks;
 	}
 
 	public boolean isEmpty() {
@@ -73,9 +91,22 @@ public final class ProfileSnapshot {
 		return entries.stream().filter(entry -> entry.category() == category).toList();
 	}
 
+	/** Scheduled block and fluid ticks, random ticks and block events in one list, highest first. */
+	public List<Entry> blockEntries() {
+		return entries.stream().filter(entry -> BLOCK_CATEGORIES.contains(entry.category())).toList();
+	}
+
+	/** Per wall-clock second of the window, for counts that are not tied to sampled ticks. */
+	public double perSecond(double value) {
+		return durationMillis <= 0 ? 0 : value * 1000.0 / durationMillis;
+	}
+
 	public List<ModEntry> mods() {
 		Map<String, long[]> totals = new LinkedHashMap<>();
 		for (Entry entry : entries) {
+			if (entry.category() == Category.CHUNK) {
+				continue;
+			}
 			long[] total = totals.computeIfAbsent(entry.namespace(), key -> new long[3]);
 			total[0] += entry.totalNanos();
 			total[1] += entry.calls();

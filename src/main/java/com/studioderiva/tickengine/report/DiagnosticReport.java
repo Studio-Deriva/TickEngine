@@ -7,6 +7,7 @@ import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
 import com.studioderiva.tickengine.notice.AdminNotices;
+import com.studioderiva.tickengine.profiler.ChunkActivity;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.stacking.EntityStacker;
@@ -465,6 +466,12 @@ public final class DiagnosticReport {
 				+ format(snapshot.msPerTick(entry.totalNanos())) + " ms/tick, "
 				+ format(entry.calls() / (double) snapshot.sampledTicks) + " calls/tick"));
 		}
+		ChunkActivity chunks = snapshot.chunks;
+		lines.add("- Chunks: " + chunks.loaded() + " loaded from disk, " + chunks.created() + " started generating, " + chunks.generated()
+			+ " finished generating in " + snapshot.durationMillis / 1000 + " s; worldgen threads "
+			+ format(snapshot.perSecond(chunks.featureNanos() + chunks.structureNanos()) / 1_000_000.0) + " ms/s");
+		chunks.worldgenMods().stream().limit(TOP_ROWS).forEach(mod -> lines.add("  - worldgen " + mod.displayName() + ": "
+			+ format(snapshot.perSecond(mod.totalNanos()) / 1_000_000.0) + " ms/s"));
 		return Section.list("Heaviest in the last profiler window", lines);
 	}
 

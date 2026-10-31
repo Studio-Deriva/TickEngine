@@ -16,6 +16,7 @@ import com.studioderiva.tickengine.network.NetworkProfiler;
 import com.studioderiva.tickengine.network.NetworkSnapshot;
 import com.studioderiva.tickengine.network.NetworkSource;
 import com.studioderiva.tickengine.notice.AdminNotices;
+import com.studioderiva.tickengine.profiler.ChunkActivity;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.report.DiagnosticReport;
@@ -33,6 +34,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.Locale;
 import java.util.function.Predicate;
@@ -46,8 +48,10 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -55,7 +59,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
  *
  * <pre>
  * /tickengine status
- * /tickengine top [mods|blockentities|entities]
+ * /tickengine top [mods|blockentities|entities|blocks|chunks]
  * /tickengine profile start [seconds] | stop | report
  * /tickengine network [start [seconds] | stop | top [mods|sources|packets|chunks] | report]
  * /tickengine config list | get &lt;key&gt; | set &lt;key&gt; &lt;value&gt; | reload
@@ -94,7 +98,9 @@ public final class TickEngineCommand {
 				.executes(context -> top(context, View.ALL))
 				.then(Commands.literal("mods").executes(context -> top(context, View.MODS)))
 				.then(Commands.literal("blockentities").executes(context -> top(context, View.BLOCK_ENTITIES)))
-				.then(Commands.literal("entities").executes(context -> top(context, View.ENTITIES))))
+				.then(Commands.literal("entities").executes(context -> top(context, View.ENTITIES)))
+				.then(Commands.literal("blocks").executes(context -> top(context, View.BLOCKS)))
+				.then(Commands.literal("chunks").executes(context -> top(context, View.CHUNKS))))
 			.then(Commands.literal("profile")
 				.requires(permission("profile"))
 				.then(Commands.literal("start")
@@ -746,7 +752,7 @@ public final class TickEngineCommand {
 
 	// --- top ---
 
-	private enum View { ALL, MODS, BLOCK_ENTITIES, ENTITIES }
+	private enum View { ALL, MODS, BLOCK_ENTITIES, ENTITIES, BLOCKS, CHUNKS }
 
 	private static int top(CommandContext<CommandSourceStack> context, View view) {
 		CommandSourceStack source = context.getSource();
@@ -770,10 +776,17 @@ public final class TickEngineCommand {
 			printMods(source, snapshot);
 		}
 		if (view == View.ALL || view == View.BLOCK_ENTITIES) {
-			printEntries(source, snapshot, ProfileSnapshot.Category.BLOCK_ENTITY, "Block entities");
+			printEntries(source, snapshot, snapshot.entries(ProfileSnapshot.Category.BLOCK_ENTITY), "Block entities", false);
 		}
 		if (view == View.ALL || view == View.ENTITIES) {
-			printEntries(source, snapshot, ProfileSnapshot.Category.ENTITY, "Entities");
+			printEntries(source, snapshot, snapshot.entries(ProfileSnapshot.Category.ENTITY), "Entities", false);
+		}
+		if (view == View.ALL || view == View.BLOCKS) {
+			printEntries(source, snapshot, snapshot.blockEntries(),
+				"Blocks (scheduled ticks, random ticks, block events)", true);
+		}
+		if (view == View.ALL || view == View.CHUNKS) {
+			printChunks(source, snapshot, view == View.CHUNKS);
 		}
 	}
 
@@ -792,9 +805,9 @@ public final class TickEngineCommand {
 		}
 	}
 
+	/** {@code showKind}: the list mixes categories (the block list), so each row says which one it is. */
 	private static void printEntries(CommandSourceStack source, ProfileSnapshot snapshot,
-		ProfileSnapshot.Category category, String title) {
-		List<ProfileSnapshot.Entry> entries = snapshot.entries(category);
+		List<ProfileSnapshot.Entry> entries, String title, boolean showKind) {
 		source.sendSuccess(() -> Component.literal(title).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
 		if (entries.isEmpty()) {
 			source.sendSuccess(() -> Component.literal("  no data").withStyle(ChatFormatting.GRAY), false);
@@ -804,26 +817,142 @@ public final class TickEngineCommand {
 			int rank = i + 1;
 			MutableComponent name = Component.literal(entry.id()).withStyle(ChatFormatting.WHITE);
 			if (entry.worstPos() != null) {
-				String dimension = entry.worstDimension().identifier().toString();
-				String coordinates = entry.worstPos().getX() + " " + entry.worstPos().getY() + " " + entry.worstPos().getZ();
-				// Land on top of a block entity instead of inside it, where a player would suffocate.
-				BlockPos start = category == ProfileSnapshot.Category.BLOCK_ENTITY ? entry.worstPos().above() : entry.worstPos();
-				int landingY = landingY(source.getServer().getLevel(entry.worstDimension()), start);
-				String landing = entry.worstPos().getX() + " " + landingY + " " + entry.worstPos().getZ();
-				name = name.withStyle(style -> style
-					.withClickEvent(MinecraftCompat.runCommand("/execute in " + dimension + " run tp @s " + landing))
-					.withHoverEvent(MinecraftCompat.showText(Component.literal(
-						"Slowest instance: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one tick\n"
-							+ dimension + " " + coordinates + "\nClick to teleport")))
-					.withUnderlined(true));
+				// Land on top of a block (entity) instead of inside it, where a player would suffocate.
+				boolean block = entry.category() != ProfileSnapshot.Category.ENTITY;
+				name = teleportLink(source, name, entry.worstDimension(), entry.worstPos(), block, false,
+					"Slowest instance: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one tick");
 			}
 			MutableComponent finalName = name;
 			double perTick = entry.calls() / (double) snapshot.sampledTicks;
-			source.sendSuccess(() -> Component.literal(" " + rank + ". ").withStyle(ChatFormatting.GRAY)
-				.append(finalName)
-				.append(Component.literal(" x" + format(perTick)).withStyle(ChatFormatting.DARK_GRAY))
+			MutableComponent line = Component.literal(" " + rank + ". ").withStyle(ChatFormatting.GRAY).append(finalName);
+			if (showKind) {
+				line.append(Component.literal(" " + entry.category().displayName.toLowerCase(Locale.ROOT))
+					.withStyle(ChatFormatting.DARK_AQUA));
+			}
+			line.append(Component.literal(" x" + format(perTick)).withStyle(ChatFormatting.DARK_GRAY))
+				.append(timing(snapshot, entry.totalNanos()));
+			source.sendSuccess(() -> line, false);
+		}
+	}
+
+	/**
+	 * Underlines {@code name} and makes a click teleport to {@code pos}, on free ground. {@code surface}:
+	 * land on the surface above (worldgen, whose positions are chunk corners at the bottom of the world).
+	 */
+	private static MutableComponent teleportLink(CommandSourceStack source, MutableComponent name,
+		ResourceKey<Level> dimensionKey, BlockPos pos, boolean onTop, boolean surface, String hover) {
+		String dimension = dimensionKey.identifier().toString();
+		String coordinates = pos.getX() + " " + pos.getY() + " " + pos.getZ();
+		ServerLevel level = source.getServer().getLevel(dimensionKey);
+		String landingY;
+		if (surface) {
+			// Reading blocks of an unloaded chunk would load it; keep the player's height then.
+			landingY = level == null || !level.isLoaded(pos) ? "~"
+				: Integer.toString(level.getHeight(Heightmap.Types.MOTION_BLOCKING, pos.getX(), pos.getZ()));
+		} else {
+			landingY = Integer.toString(landingY(level, onTop ? pos.above() : pos));
+		}
+		String landing = pos.getX() + " " + landingY + " " + pos.getZ();
+		return name.withStyle(style -> style
+			.withClickEvent(MinecraftCompat.runCommand("/execute in " + dimension + " run tp @s " + landing))
+			.withHoverEvent(MinecraftCompat.showText(Component.literal(
+				hover + "\n" + dimension + " " + coordinates + "\nClick to teleport")))
+			.withUnderlined(true));
+	}
+
+	/**
+	 * Chunk work on the server thread (per sampled tick), then loading and generation over the whole
+	 * window. {@code detailed}: also the slowest features and structures and the worldgen mods.
+	 */
+	private static void printChunks(CommandSourceStack source, ProfileSnapshot snapshot, boolean detailed) {
+		ChunkActivity chunks = snapshot.chunks;
+		List<ProfileSnapshot.Entry> work = snapshot.entries(ProfileSnapshot.Category.CHUNK);
+		source.sendSuccess(() -> Component.literal("Chunks").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
+		if (work.isEmpty() && chunks.isEmpty()) {
+			source.sendSuccess(() -> Component.literal("  no chunk loaded, generated or saved").withStyle(ChatFormatting.GRAY), false);
+			return;
+		}
+		for (ProfileSnapshot.Entry entry : work) {
+			source.sendSuccess(() -> Component.literal("  " + entry.id()).withStyle(ChatFormatting.WHITE)
 				.append(timing(snapshot, entry.totalNanos())), false);
 		}
+		if (chunks.betweenTickNanos() > 0) {
+			source.sendSuccess(() -> Component.literal("  Chunk tasks between ticks: ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal(format(snapshot.perSecond(chunks.betweenTickNanos()) / 1_000_000.0) + " ms/s")
+					.withStyle(ChatFormatting.WHITE))
+				.append(Component.literal(" (spare time, not tick time)").withStyle(ChatFormatting.DARK_GRAY)), false);
+		}
+		source.sendSuccess(() -> Component.literal("  Loaded from disk ").withStyle(ChatFormatting.GRAY)
+			.append(count(snapshot, chunks.loaded()))
+			.append(Component.literal(", started generating ").withStyle(ChatFormatting.GRAY)
+				.withStyle(style -> style.withHoverEvent(MinecraftCompat.showText(Component.literal(
+					"Chunks with nothing saved. Around every chunk that finishes generating,\n"
+						+ "its neighbours are generated part of the way, so this is higher.")))))
+			.append(count(snapshot, chunks.created()))
+			.append(Component.literal(", finished ").withStyle(ChatFormatting.GRAY))
+			.append(count(snapshot, chunks.generated())), false);
+		if (!chunks.generatedNear().isEmpty()) {
+			String near = chunks.generatedNear().stream().limit(detailed ? TickEngineConfig.chatTopEntries : 3)
+				.map(player -> player.player() + " " + player.chunks()).collect(Collectors.joining(", "));
+			source.sendSuccess(() -> Component.literal("  Generated near: ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal(near).withStyle(ChatFormatting.WHITE)), false);
+		}
+		long features = chunks.featureNanos();
+		long structures = chunks.structureNanos();
+		if (features > 0 || structures > 0) {
+			source.sendSuccess(() -> Component.literal("  Worldgen threads: features ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal(format(snapshot.perSecond(features) / 1_000_000.0) + " ms/s").withStyle(ChatFormatting.WHITE))
+				.append(Component.literal(", structures ").withStyle(ChatFormatting.GRAY))
+				.append(Component.literal(format(snapshot.perSecond(structures) / 1_000_000.0) + " ms/s").withStyle(ChatFormatting.WHITE))
+				.append(Component.literal(" (not tick time)").withStyle(ChatFormatting.DARK_GRAY)), false);
+		}
+		if (!detailed) {
+			if (features > 0 || structures > 0 || chunks.generated() > 0) {
+				source.sendSuccess(() -> Component.literal("  Slowest features and structures: /tickengine top chunks")
+					.withStyle(ChatFormatting.DARK_GRAY), false);
+			}
+			return;
+		}
+		printWorldgen(source, snapshot, "Worldgen by mod", null, chunks.worldgenMods());
+		printWorldgen(source, snapshot, "Features", chunks.features(), null);
+		printWorldgen(source, snapshot, "Structures", chunks.structures(), null);
+	}
+
+	private static void printWorldgen(CommandSourceStack source, ProfileSnapshot snapshot, String title,
+		List<ChunkActivity.WorldgenEntry> entries, List<ProfileSnapshot.ModEntry> mods) {
+		int size = entries != null ? entries.size() : mods.size();
+		if (size == 0) {
+			return;
+		}
+		source.sendSuccess(() -> Component.literal(" " + title).withStyle(ChatFormatting.AQUA), false);
+		for (int i = 0; i < Math.min(TickEngineConfig.chatTopEntries, size); i++) {
+			int rank = i + 1;
+			MutableComponent name;
+			long nanos;
+			if (entries != null) {
+				ChunkActivity.WorldgenEntry entry = entries.get(i);
+				nanos = entry.totalNanos();
+				name = Component.literal(entry.id()).withStyle(ChatFormatting.WHITE);
+				if (entry.worstPos() != null && entry.worstDimension() != null) {
+					name = teleportLink(source, name, entry.worstDimension(), entry.worstPos(), false, true,
+						"Slowest placement: " + format(entry.worstNanos() / 1_000_000.0) + " ms in one chunk");
+				}
+				name.append(Component.literal(" x" + entry.calls()).withStyle(ChatFormatting.DARK_GRAY));
+			} else {
+				ProfileSnapshot.ModEntry mod = mods.get(i);
+				nanos = mod.totalNanos();
+				name = Component.literal(mod.displayName()).withStyle(ChatFormatting.WHITE);
+			}
+			MutableComponent finalName = name;
+			source.sendSuccess(() -> Component.literal("  " + rank + ". ").withStyle(ChatFormatting.GRAY).append(finalName)
+				.append(Component.literal("  " + format(snapshot.perSecond(nanos) / 1_000_000.0) + " ms/s")
+					.withStyle(ChatFormatting.WHITE)), false);
+		}
+	}
+
+	private static MutableComponent count(ProfileSnapshot snapshot, long count) {
+		return Component.literal(Long.toString(count)).withStyle(ChatFormatting.WHITE)
+			.append(Component.literal(" (" + format(snapshot.perSecond(count)) + "/s)").withStyle(ChatFormatting.DARK_GRAY));
 	}
 
 	/**
