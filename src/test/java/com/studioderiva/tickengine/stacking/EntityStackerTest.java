@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
 class EntityStackerTest {
@@ -53,5 +54,23 @@ class EntityStackerTest {
 		leashed.put("leash", new CompoundTag());
 		assertTrue(EntityStacker.signature(leashed).isEmpty());
 		assertFalse(EntityStacker.signature(sheep((byte) 0, false, 8, 0)).isEmpty());
+	}
+
+	@Test
+	void endermenCarryingABlockNeverMatch() {
+		CompoundTag enderman = new CompoundTag();
+		enderman.putString("id", "minecraft:enderman");
+		enderman.put("carriedBlockState", new CompoundTag());
+		assertTrue(EntityStacker.signature(enderman).isEmpty());
+	}
+
+	@Test
+	void onlyTheStackNameLooksLikeOne() {
+		// Shaped like stackName(type, 7), which needs the registries for the type.
+		assertTrue(EntityStacker.isStackName(Component.translatable("entity.minecraft.zombie").append(Component.literal(" x7"))));
+		assertFalse(EntityStacker.isStackName(Component.literal("Zombie x7")), "a name tag");
+		assertFalse(EntityStacker.isStackName(Component.translatable("entity.minecraft.zombie")));
+		assertFalse(EntityStacker.isStackName(Component.translatable("entity.minecraft.zombie").append(Component.literal(" the 2nd"))));
+		assertFalse(EntityStacker.isStackName(null));
 	}
 }

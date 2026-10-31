@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * A player interaction with a stack that does something (feeding, shearing, a name tag, a lead)
+ * A player interaction with a stack that does something (feeding, shearing, a name tag, a lead, a bucket)
  * applies to one mob only; {@link EntityStacker} moves the rest to a copy. Hooked on the player
  * rather than on {@code Mob.interact}: on Forge, shears (IForgeShearable) and other items act through
  * {@code Item.interactLivingEntity}, which {@code interactOn} calls after the mob's own interaction.

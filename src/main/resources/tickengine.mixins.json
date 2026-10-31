@@ -13,6 +13,8 @@
 		"LevelMixin",
 		"LivingEntityAccessor",
 		"LivingEntityStackMixin",
+		"MobConversionMixin",
+		"MobDropChanceInvoker",
 		"MobMixin",
 		"NaturalSpawnerMixin",
 		"PacketEncoderMixin",

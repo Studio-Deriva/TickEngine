@@ -17,8 +17,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.animal.Cod;
 import net.minecraft.world.entity.animal.Cow;
+import net.minecraft.world.entity.animal.MushroomCow;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
@@ -189,5 +192,137 @@ public final class StackingTests {
 		run(helper, "/tickengine stacking mode off");
 		check(TickEngineConfig.stackingMode.equals("off"), "mode off needs no confirmation");
 		helper.succeed();
+	}
+
+	private static long swordsOnTheGround(GameTestHelper helper) {
+		return inArea(helper, EntityType.ITEM).stream().filter(item -> item.getItem().is(Items.DIAMOND_SWORD)).count();
+	}
+
+	/** Holds a sword the way a mob holds what it picked up: it always drops. */
+	private static void pickUpSword(Mob mob) {
+		mob.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.DIAMOND_SWORD));
+		mob.setGuaranteedDrop(EquipmentSlot.MAINHAND);
+	}
+
+	/** One stack picking up one item was several mobs holding it: killed one by one, it dropped one item each. */
+	@GameTest(template = "floor", batch = "stacking_pickup", timeoutTicks = 300)
+	public static void anItemAStackPicksUpDropsOnce(GameTestHelper helper) {
+		configure(helper, "stacking.mode", "always");
+		for (int i = 0; i < 3; i++) {
+			spawnPlain(helper, EntityType.COW, 8.5, 2, 8.5);
+		}
+		helper.runAfterDelay(60, () -> {
+			List<Cow> cows = inArea(helper, EntityType.COW);
+			check(cows.size() == 1 && EntityStacker.count(cows.get(0)) == 3, "expected one stack of 3 cows");
+			pickUpSword(cows.get(0));
+			cows.get(0).hurt(helper.getLevel().damageSources().generic(), 1000);
+			helper.runAfterDelay(2, () -> {
+				inArea(helper, EntityType.COW).forEach(cow -> cow.hurt(helper.getLevel().damageSources().generic(), 1000));
+				helper.runAfterDelay(2, () -> {
+					inArea(helper, EntityType.COW).forEach(cow -> cow.hurt(helper.getLevel().damageSources().generic(), 1000));
+					helper.runAfterDelay(2, () -> {
+						check(inArea(helper, EntityType.COW).isEmpty(), "all three cows should be dead");
+						long swords = swordsOnTheGround(helper);
+						check(swords == 1, "expected the one sword back, got " + swords);
+						helper.succeed();
+					});
+				});
+			});
+		});
+	}
+
+	@GameTest(template = "floor", batch = "stacking_pickup_unstack", timeoutTicks = 300)
+	public static void unstackingDoesNotCopyPickedUpItems(GameTestHelper helper) {
+		configure(helper, "stacking.mode", "always");
+		for (int i = 0; i < 3; i++) {
+			spawnPlain(helper, EntityType.COW, 8.5, 2, 8.5);
+		}
+		helper.runAfterDelay(60, () -> {
+			List<Cow> cows = inArea(helper, EntityType.COW);
+			check(cows.size() == 1 && EntityStacker.count(cows.get(0)) == 3, "expected one stack of 3 cows");
+			pickUpSword(cows.get(0));
+			configure(helper, "stacking.mode", "off");
+			EntityStacker.unstackAll(helper.getLevel().getServer());
+			List<Cow> after = inArea(helper, EntityType.COW);
+			long armed = after.stream().filter(cow -> cow.getMainHandItem().is(Items.DIAMOND_SWORD)).count();
+			check(after.size() == 3 && armed == 1, "expected 3 cows, 1 with the sword, got " + after.size() + " and " + armed);
+			helper.succeed();
+		});
+	}
+
+	@GameTest(template = "floor", batch = "stacking_pickup_merge", timeoutTicks = 200)
+	public static void mobsHoldingPickedUpItemsNeverStack(GameTestHelper helper) {
+		configure(helper, "stacking.mode", "always");
+		for (int i = 0; i < 3; i++) {
+			pickUpSword(spawnPlain(helper, EntityType.COW, 8.5, 2, 8.5));
+		}
+		helper.runAfterDelay(60, () -> {
+			List<Cow> cows = inArea(helper, EntityType.COW);
+			check(cows.size() == 3, "cows holding a picked-up sword should not stack, got " + cows.size() + " cows");
+			helper.succeed();
+		});
+	}
+
+	@GameTest(template = "floor", batch = "stacking_bucket", timeoutTicks = 300)
+	public static void aBucketTakesOneFishFromAStack(GameTestHelper helper) {
+		configure(helper, "stacking.mode", "always");
+		for (int i = 0; i < 3; i++) {
+			spawnPlain(helper, EntityType.COD, 8.5, 2, 8.5);
+		}
+		helper.runAfterDelay(40, () -> {
+			List<Cod> cod = inArea(helper, EntityType.COD);
+			check(cod.size() == 1 && EntityStacker.count(cod.get(0)) == 3, "expected one stack of 3 cod, got " + cod.size()
+				+ " holding " + total(cod));
+			ServerPlayer player = TestSupport.playerAt(helper, cod.get(0).getX(), cod.get(0).getZ());
+			player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.WATER_BUCKET));
+			player.interactOn(cod.get(0), InteractionHand.MAIN_HAND);
+			List<Cod> after = inArea(helper, EntityType.COD);
+			check(player.getItemInHand(InteractionHand.MAIN_HAND).is(Items.COD_BUCKET), "the player should hold a bucket of cod");
+			check(total(after) == 2, "expected 2 cod left, got " + total(after));
+			helper.succeed();
+		});
+	}
+
+	@GameTest(template = "floor", batch = "stacking_shear_mooshroom", timeoutTicks = 300)
+	public static void shearingAMooshroomStackTurnsOneIntoACow(GameTestHelper helper) {
+		configure(helper, "stacking.mode", "always");
+		for (int i = 0; i < 3; i++) {
+			spawnPlain(helper, EntityType.MOOSHROOM, 8.5, 2, 8.5);
+		}
+		helper.runAfterDelay(60, () -> {
+			List<MushroomCow> mooshrooms = inArea(helper, EntityType.MOOSHROOM);
+			check(mooshrooms.size() == 1 && EntityStacker.count(mooshrooms.get(0)) == 3, "expected one stack of 3 mooshrooms");
+			ServerPlayer player = TestSupport.playerAt(helper, mooshrooms.get(0).getX(), mooshrooms.get(0).getZ());
+			player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.SHEARS));
+			player.interactOn(mooshrooms.get(0), InteractionHand.MAIN_HAND);
+			check(total(inArea(helper, EntityType.MOOSHROOM)) == 2, "expected 2 mooshrooms left, got "
+				+ total(inArea(helper, EntityType.MOOSHROOM)));
+			List<Cow> cows = inArea(helper, EntityType.COW);
+			check(cows.size() == 1 && total(cows) == 1, "expected one single cow, got " + cows.size() + " holding " + total(cows));
+			// The cow took the stack's name with it; the next stacking round takes it away.
+			helper.runAfterDelay(45, () -> {
+				check(!inArea(helper, EntityType.COW).get(0).hasCustomName(), "the cow should lose the stack name, got "
+					+ inArea(helper, EntityType.COW).get(0).getCustomName());
+				helper.succeed();
+			});
+		});
+	}
+
+	@GameTest(template = "floor", batch = "stacking_convert", timeoutTicks = 300)
+	public static void aConvertedStackKeepsItsCountAndGetsItsNewName(GameTestHelper helper) {
+		configure(helper, "stacking.mode", "always");
+		for (int i = 0; i < 3; i++) {
+			spawnPlain(helper, EntityType.COW, 8.5, 2, 8.5);
+		}
+		helper.runAfterDelay(60, () -> {
+			List<Cow> cows = inArea(helper, EntityType.COW);
+			check(cows.size() == 1 && EntityStacker.count(cows.get(0)) == 3, "expected one stack of 3 cows");
+			Mob converted = cows.get(0).convertTo(EntityType.MOOSHROOM, false);
+			check(converted != null && EntityStacker.count(converted) == 3, "the mooshroom should hold 3, holds "
+				+ (converted == null ? 0 : EntityStacker.count(converted)));
+			check(converted.getCustomName() != null && converted.getCustomName().getString().equals("Mooshroom x3"),
+				"name: " + converted.getCustomName());
+			helper.succeed();
+		});
 	}
 }

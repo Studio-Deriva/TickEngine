@@ -289,8 +289,14 @@ wandering traders by default, for their trades). Change the list with `/tickengi
 
 - Killing it kills one mob at a time, with its own loot and XP; the rest stays as a stack. Farms give
   the same as without stacking. `/kill` removes the whole stack.
-- Using it in a way that does something (feeding, shearing, a name tag, a lead, a spawn egg) separates
-  the mob you clicked; the rest stays a stack. So feeding a stack of cows breeds them as usual.
+- Using it in a way that does something (feeding, shearing, dyeing, a name tag, a lead, a spawn egg, a
+  bucket) separates the mob you clicked; the rest stays a stack. So feeding a stack of cows breeds them
+  as usual, and a bucket takes one fish.
+- What a stack picks up (an item, a block for an enderman) belongs to one mob: it drops once, and the
+  mobs that come out of the stack when it is killed, used or unstacked do not carry it. Mobs already
+  holding something they picked up never stack.
+- A stack that turns into another mob (a zombie drowning, a pig struck by lightning) stays a stack with
+  the same count.
 - Natural spawning counts every mob in a stack, so the mob cap stays as without stacking.
 - The count is kept in a tag, `tickengine.stack.<n>` (usable in selectors: `@e[tag=tickengine.stack.10]`),
   and survives restarts.

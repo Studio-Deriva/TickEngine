@@ -74,10 +74,12 @@ test {
 	useJUnitPlatform()
 }
 
-// GameTests start from the default config: the file a previous run left behind would override the defaults.
+// GameTests start from the default config and a new world: the config file a previous run left behind
+// would override the defaults, and the mobs it left in the world would load into the same test areas.
 tasks.matching { it.name == 'runGameTestServer' }.configureEach {
 	doFirst {
 		delete file('run-gametest/config/tickengine.json5')
+		delete file('run-gametest/world')
 	}
 }
 

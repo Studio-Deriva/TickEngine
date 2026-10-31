@@ -10,6 +10,18 @@
   and Forge's login handshake counts as a channel.
 - Tested on a Forge 1.20.1 dev server with a client: entities, blocks, block entities, sounds,
   particles, chunks and Forge's login handshake (`fml:loginwrapper`).
+- **Fix: entity stacking duplicated items.** An item a stack picked up (a zombie's sword, a piglin's gold,
+  a fox's item, an enderman's block) came back with every mob of the stack: killed one by one, a stack of
+  5 that picked up one diamond sword dropped 5, and `/tickengine stacking unstack` gave every mob of the
+  stack the item. Now only one mob holds it, and mobs holding something they picked up never stack.
+- **Fix: a bucket took a whole stack.** Picking up a stack of fish or axolotls with a bucket removed every
+  mob in it; now the bucket takes one and the rest stays. The same for shearing a stack of mooshrooms:
+  one turns into a cow.
+- **Fix: a stack that converted lost its count.** On 1.20.1 conversions do not copy tags: a stack of
+  zombies that drowned became one drowned named "Zombie x3". Now it is a stack of 3 named "Drowned x3".
+- **Fix: network profiler, chunks.** A packet that changes several kinds of blocks in a chunk was counted
+  once per kind of block in the chunk's packets per second.
+- GameTests start from a new world each run, so mobs left by an earlier run no longer load into a test.
 
 ## 1.0.0-beta.6+1.20.1-forge
 
