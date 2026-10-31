@@ -103,6 +103,8 @@ send 'kill @e[type=minecraft:cow]' 1
 send 'tickengine stacking mode off' 1
 # Network profiler: server list pings are real connections, so packets get encoded and measured.
 send 'tickengine network start 5' 1
+# Asked while the session runs: it must say so instead of showing an old result as if it were new.
+send 'tickengine network top' 1
 for _ in 1 2 3; do
 	python3 -I "$root/tools/status-ping.py" localhost 25565 >> "$out/ping.log" 2>&1 || echo "ping failed" >> "$out/ping.log"
 done
@@ -153,6 +155,7 @@ check "entity stacking merges cows (NBT save, tags, name)" 'Cow x3 has the follo
 check "a stack loses one mob when it dies (die mixin, NBT load)" 'Cow x2 has the following entity data'
 check "network profiler measures packets (PacketEncoder mixin)" 'minecraft:status_response'
 check "network HTML report is written" 'HTML report saved: .*tickengine-network-'
+check "network top during a session says it is running" 'A network session is running \([0-9]+ s left\)'
 check "network status command" 'Last result.*/s over'
 check "server stops cleanly" 'Stopping server|All dimensions are saved'
 check_absent "no mixin errors" 'InvalidInjectionException|InjectionError|MixinApplyError|Mixin apply .*failed|Critical injection failure|@Shadow field .* was not located'

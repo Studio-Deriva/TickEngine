@@ -26,6 +26,9 @@ import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import com.studioderiva.tickengine.tuning.AutoTuner;
 import com.studioderiva.tickengine.tuning.EmergencyMode;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -972,11 +975,25 @@ public final class TickEngineCommand {
 		writeNetworkReport(server, source, result);
 	}
 
+	private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+
+	/**
+	 * The last finished result. While a session runs it is the one from before, so say so: otherwise it
+	 * looks like the running session found nothing.
+	 */
 	private static NetworkSnapshot lastNetworkSnapshot(CommandSourceStack source) {
 		NetworkSnapshot snapshot = NetworkProfiler.lastSnapshot();
+		boolean running = NetworkProfiler.isSessionRunning();
 		if (snapshot == null || snapshot.isEmpty()) {
-			source.sendFailure(Component.literal("No network results yet. Run '/tickengine network start [seconds]' first."));
+			source.sendFailure(Component.literal(running
+				? "A network session is running (" + NetworkProfiler.sessionSecondsLeft() + " s left); its results come when it ends."
+				: "No network results yet. Run '/tickengine network start [seconds]' first."));
 			return null;
+		}
+		if (running) {
+			source.sendSuccess(() -> Component.literal("A network session is running (" + NetworkProfiler.sessionSecondsLeft()
+				+ " s left). This is the previous result, started at " + CLOCK.format(Instant.ofEpochMilli(snapshot.startMillis))
+				+ "; the new one comes when the session ends.").withStyle(ChatFormatting.YELLOW), false);
 		}
 		return snapshot;
 	}
