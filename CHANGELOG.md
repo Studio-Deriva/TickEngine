@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0-beta.8+1.20.1-forge
+
+- **Profiler: redstone, fluids, random ticks and block events.** The tick profiler now also times
+  scheduled block ticks (repeaters, comparators, observers, falling blocks: most redstone, including the
+  dust they power), fluid ticks (water and lava flowing), random ticks (crops, leaves, lava) and block
+  events (pistons, note blocks), per block or fluid, with the slowest place to teleport to. They count
+  toward their mod. `/tickengine top blocks`, and a Blocks section in the HTML report.
+- **Profiler: chunks and worldgen.** Server-thread time on loading, finishing, waiting for, unloading and
+  saving chunks (rows that add up, per sampled tick), chunk tasks between ticks, chunks loaded from disk,
+  started and finished generating, generated chunks by nearest player, and the time each feature and
+  structure takes on the worldgen threads, by mod. `/tickengine top chunks` and a Chunks section in the HTML
+  report.
+- Same as the Fabric version, ported to 1.20.1. On 1.20.1 vanilla only random ticks chunks near a player,
+  and chunk loading runs between ticks, so it shows as chunk tasks between ticks rather than per tick.
+- Tested with GameTests (redstone, pistons, water, random ticks, chunk generation) and on a Forge 1.20.1
+  dev server with a client: worldgen features and structures, generated chunks by player, chunks loaded
+  from disk.
+
 ## 1.0.0-beta.7+1.20.1-forge
 
 - **Network profiler** (`/tickengine network start [seconds]`), as in the Fabric version's 1.0.0-beta.7.

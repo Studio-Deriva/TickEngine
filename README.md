@@ -37,7 +37,12 @@ see [Compatibility](#compatibility)).
 
 - **Tick profiler, always on.** A light mode samples one tick per second at almost no cost and feeds
   `/tickengine top`: the most expensive mods and types, with the slowest instance of each. Click one to
-  teleport there.
+  teleport there. It covers block entities, entities, redstone and other scheduled block ticks, flowing
+  water and lava, random ticks (crops, leaves), block events (pistons, note blocks) and chunk work.
+- **Chunk loading and generation.** How much server-thread time goes to loading, finishing, waiting for,
+  unloading and saving chunks; how many chunks load from disk and how many are generated, and near which
+  player; and which features and structures (and so which worldgen mods) take the most time on the
+  worldgen threads. `/tickengine top chunks`.
 - **Detailed sessions and HTML reports.** `/tickengine profile start` measures every tick for a while,
   then prints the ranking and writes a self-contained HTML report (light and dark theme). Reports are
   written off the server thread, so a slow disk never causes lag.
@@ -99,6 +104,19 @@ Install it on the **server only**. Players don't need it, and it does nothing on
   (`profiler.maxSessionSeconds`, default 600).
 - Time is grouped by mod (the namespace of the type) and by type. Work a mod adds to vanilla code
   through mixins is counted under the vanilla type it runs in.
+- **Blocks.** Scheduled block ticks (repeaters, comparators, observers, falling blocks), fluid ticks,
+  random ticks and block events are timed per block or fluid. A scheduled tick includes the block updates
+  it causes, so a repeater's time includes the redstone dust it powers. On 1.20.1, vanilla only
+  random ticks chunks near a player, so force-loaded chunks with nobody near show no random ticks there.
+- **Chunks.** Server-thread chunk work is timed per sampled tick in four rows that add up: loading saved
+  chunks, finishing chunks and other chunk tasks, waiting for a chunk to load or generate, and unloading
+  and saving. Chunk tasks that run between ticks, when the server has time to spare, do not raise MSPT
+  and are shown apart, in ms per second. Counts (loaded from disk, started and finished generating, by
+  nearest player) cover the whole window, not only sampled ticks.
+- **Worldgen.** Each feature (tree, ore, flower patch) and the part of each structure placed in a chunk
+  is timed on the worldgen threads, grouped by mod. This is not tick time, but slow worldgen makes new
+  chunks appear late and makes the server wait when it needs one. With mods that move chunk work off
+  the server thread (C2ME), the chunk rows may be partly empty: TickEngine only counts the server thread.
 
 ## How the network profiler works
 
@@ -338,7 +356,7 @@ overwritten: the settings in use are kept and the command tells you.
 | Command | What |
 |---------|------|
 | `/tickengine status` | MSPT, TPS, what the throttles and auto-tuning are doing |
-| `/tickengine top [mods\|blockentities\|entities]` | Most expensive mods and types from the light profiler. Click a type to teleport to its slowest instance. |
+| `/tickengine top [mods\|blockentities\|entities\|blocks\|chunks]` | Most expensive mods and types from the light profiler. Click a type to teleport to its slowest instance. `blocks`: scheduled block and fluid ticks, random ticks and block events together. `chunks`: chunk work, chunk counts, and the slowest features, structures and worldgen mods. |
 | `/tickengine profile start [seconds]` | Detailed session: measures every tick, then prints results and writes an HTML report |
 | `/tickengine profile stop` | Stop the session early |
 | `/tickengine profile report` | HTML report from the light profiler |

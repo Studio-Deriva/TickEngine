@@ -5,11 +5,16 @@
 	"minVersion": "0.8",
 	"compatibilityLevel": "JAVA_17",
 	"server": [
+		"BlockableEventLoopMixin",
 		"BoundTickingBlockEntityMixin",
+		"ChunkDataReadMixin",
+		"ChunkMapMixin",
+		"ChunkTaskExecutorMixin",
 		"CompressionEncoderMixin",
 		"EntityInvoker",
 		"ExperienceOrbAccessor",
 		"ItemEntityAccessor",
+		"LevelChunkMixin",
 		"LevelMixin",
 		"LivingEntityAccessor",
 		"LivingEntityStackMixin",
@@ -18,9 +23,11 @@
 		"MobMixin",
 		"NaturalSpawnerMixin",
 		"PacketEncoderMixin",
+		"PlacedFeatureMixin",
 		"PlayerStackMixin",
 		"ServerEntityMixin",
 		"ServerLevelMixin",
+		"StructureStartMixin",
 		"TrackedEntityMixin"
 	],
 	"injectors": {
