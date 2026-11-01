@@ -41,6 +41,10 @@ public final class TickEngineConfig {
 	// --- output ---
 	public static int chatTopEntries = 10;
 	public static String reportDirectory = "tickengine/reports";
+	public static boolean webServer = true;
+	public static int webPort = 8765;
+	public static String webBindAddress = "0.0.0.0";
+	public static String webPublicAddress = "auto";
 
 	// --- permissions ---
 	public static int commandOpLevel = 3;
@@ -168,6 +172,22 @@ public final class TickEngineConfig {
 		register(Option.string("output.reportDirectory",
 			"Folder for HTML reports, relative to the server folder. Must stay inside the server folder.",
 			() -> reportDirectory, v -> reportDirectory = v, TickEngineConfig::checkReportDirectory));
+		register(Option.bool("output.webServer",
+			"Small built-in web server that shows HTML reports in the browser: the path in chat becomes a\n"
+				+ "link to click. It serves only the HTML reports, each behind a secret link. The port must be\n"
+				+ "reachable from your PC (on a hosting panel, add it as an extra port).",
+			() -> webServer, v -> webServer = v));
+		register(Option.integer("output.webPort",
+			"Port of the report web server. Range: 1024-65535.",
+			1024, 65535, () -> webPort, v -> webPort = v));
+		register(Option.string("output.webBindAddress",
+			"Address the report web server listens on. 0.0.0.0 = every network interface,\n"
+				+ "127.0.0.1 = only this machine.",
+			() -> webBindAddress, v -> webBindAddress = v.trim(), value -> null));
+		register(Option.string("output.webPublicAddress",
+			"Host name or IP put in report links, e.g. play.example.com. \"auto\" uses 'server-ip' from\n"
+				+ "server.properties, or else the address the player reached the server on.",
+			() -> webPublicAddress, v -> webPublicAddress = v.trim(), TickEngineConfig::checkPublicAddress));
 		register(Option.integer("permissions.commandOpLevel",
 			"Operator level required for /tickengine when no permissions mod (e.g. LuckPerms) is installed.\n"
 				+ "With LuckPerms use the nodes tickengine.status, tickengine.top, tickengine.profile,\n"
@@ -465,6 +485,11 @@ public final class TickEngineConfig {
 			return "is not a valid path.";
 		}
 		return null;
+	}
+
+	/** Returns an error message when the value cannot be the host part of a link, or null when it is valid. */
+	private static String checkPublicAddress(String value) {
+		return value.trim().matches("[A-Za-z0-9.:\\[\\]-]+") ? null : "must be a host name or an IP, without http:// or a port.";
 	}
 
 	/** Returns an error message when options are inconsistent with each other, or null when they are valid. */

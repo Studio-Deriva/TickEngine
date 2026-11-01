@@ -26,6 +26,8 @@
 		"PlacedFeatureMixin",
 		"PlayerStackMixin",
 		"ServerEntityMixin",
+		"ServerGamePacketListenerAccessor",
+		"ServerHandshakeMixin",
 		"ServerLevelMixin",
 		"StructureStartMixin",
 		"TrackedEntityMixin"

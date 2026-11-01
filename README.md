@@ -117,6 +117,12 @@ Install it on the **server only**. Players don't need it, and it does nothing on
   is timed on the worldgen threads, grouped by mod. This is not tick time, but slow worldgen makes new
   chunks appear late and makes the server wait when it needs one. With mods that move chunk work off
   the server thread (C2ME), the chunk rows may be partly empty: TickEngine only counts the server thread.
+- **Reports in the browser.** The chat line of a saved HTML report has an `[open in browser]` link,
+  served by a small built-in web server (`output.webServer`, port `output.webPort`, default 8765). It
+  serves only the HTML reports, each at a secret link, and nothing else. Links use
+  `output.webPublicAddress` (for example `play.example.com`); with the default `auto` they use `server-ip`
+  from `server.properties`, or else the address the player typed to join. On a hosting panel, add the
+  port as an extra port, or set `output.webServer` to false to keep the port closed.
 
 ## How the network profiler works
 
@@ -333,6 +339,8 @@ ones:
 ```jsonc
 {
   "profiler":      { "enabled": true, "sampleEveryTicks": 20, "windowSeconds": 60 },
+  "output":        { "reportDirectory": "tickengine/reports", "webServer": true, "webPort": 8765,
+                     "webPublicAddress": "auto" },
   "blockEntities": { "enabled": true, "activeRadiusChunks": 4, "defaultInterval": 4,
                      "forcedChunkMaxInterval": 2, "rules": { "minecraft:piston": 1 } },
   "entities":      { "enabled": true, "fullRadiusChunks": 2, "aiRadiusChunks": 4,

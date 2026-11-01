@@ -7,6 +7,7 @@ import com.studioderiva.tickengine.network.NetworkProfiler;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.permission.TickEnginePermissions;
 import com.studioderiva.tickengine.profiler.TickProfiler;
+import com.studioderiva.tickengine.report.ReportWebServer;
 import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
@@ -58,7 +59,10 @@ public final class TickEngine {
 				AdminNotices.tick(event.getServer());
 			}
 		});
-		bus.addListener((ServerStartedEvent event) -> ServerCoreCompat.refresh());
+		bus.addListener((ServerStartedEvent event) -> {
+			ServerCoreCompat.refresh();
+			ReportWebServer.refresh(event.getServer());
+		});
 		// Before worlds save, so the original distances are back in place.
 		bus.addListener((ServerStoppingEvent event) -> {
 			EmergencyMode.shutdown();
@@ -71,6 +75,7 @@ public final class TickEngine {
 			EntityThrottle.reset();
 			EntityStacker.reset();
 			AdminNotices.reset();
+			ReportWebServer.stop();
 		});
 		bus.addListener((PlayerEvent.PlayerLoggedInEvent event) -> {
 			if (event.getEntity() instanceof ServerPlayer player) {

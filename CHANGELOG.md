@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0-beta.9+1.20.1-forge
+
+- **HTML reports open in the browser with a click.** The "HTML report saved" line in chat now has an
+  `[open in browser]` link, served by a small built-in web server (`output.webServer`, on by default,
+  port `output.webPort` 8765). It serves only the HTML reports, each behind its own secret link (an HMAC
+  of the file name with a key in `config/tickengine-web.secret`), so a shared link opens one report and
+  links keep working after a restart. The link uses `output.webPublicAddress`, or by default
+  `server-ip`, or else the address the player typed to join. On a hosting panel, add the port as an
+  extra port or set `output.webServer` to false; when the port cannot be opened the server logs a
+  warning and chat shows the path as before.
+- Same as the Fabric version, ported to 1.20.1. Tested on a Forge 1.20.1 dev server with a client.
+
 ## 1.0.0-beta.8+1.20.1-forge
 
 - **Profiler: redstone, fluids, random ticks and block events.** The tick profiler now also times
