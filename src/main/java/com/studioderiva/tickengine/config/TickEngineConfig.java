@@ -140,6 +140,31 @@ public final class TickEngineConfig {
 		"Also never stacked: named, tamed or leashed mobs, babies, animals in love, mobs in combat, riders",
 		"and their mounts, bosses. Change live with '/tickengine stacking exclude'."});
 
+	// --- entity limit ---
+	public static boolean entityLimitEnabled = false;
+	public static int entityLimitPerChunk = 48;
+	public static boolean limitNaturalSpawning = true;
+	public static boolean limitSpawners = true;
+	public static boolean limitBreeding = true;
+	public static final ThrottleRules<Integer> LIMIT_RULES = new ThrottleRules<>(ThrottleRules.LIMIT,
+		new String[] {
+			"Limit per type or per mod, instead of 'perChunk': \"minecraft:chicken\": 32, \"somemod:*\": 20.",
+			"The most specific rule wins (type before mod). Change live with '/tickengine limit rules'."},
+		new String[] {
+			"Same as 'rules' but only in one dimension; \"*\" matches every type there.",
+			"Example: \"minecraft:the_nether\": { \"*\": 24 }"});
+	public static final TargetList LIMIT_EXCLUDE = new TargetList("exclude", new String[] {
+		"Entity types or whole mods the limit never stops: [\"minecraft:villager\", \"somemod:*\"].",
+		"Change live with '/tickengine limit exclude'."});
+
+	// --- history ---
+	public static boolean historyEnabled = true;
+	public static int historyKeepDays = 7;
+	public static int historyPeakAverageMspt = 50;
+	public static int historyPeakTickMs = 500;
+	public static int historyPeakTuningLevel = 5;
+	public static boolean historyProfilePeaks = false;
+
 	// --- compatibility and notices ---
 	public static boolean disableEntityThrottleWithServerCore = true;
 	public static boolean noticesEnabled = true;
@@ -425,6 +450,52 @@ public final class TickEngineConfig {
 				+ "looks at the mob up close, like a name tag.",
 			() -> stackAlwaysShowCount, v -> stackAlwaysShowCount = v));
 
+		register(Option.bool("entityLimit.enabled",
+			"Off by default. Limits how many mobs of one type a chunk can hold: once a chunk has 'perChunk'\n"
+				+ "of a type (or the number of its rule), new ones of that type stop spawning or being born there\n"
+				+ "until some die or leave. Nothing already there is removed. A stack counts as one mob. Players\n"
+				+ "can still use spawn eggs, dispensers and commands.",
+			() -> entityLimitEnabled, v -> entityLimitEnabled = v));
+		register(Option.integer("entityLimit.perChunk",
+			"Most mobs of one type in one chunk, for types without a rule. Range: 1-" + ThrottleRules.MAX_LIMIT + ".",
+			1, ThrottleRules.MAX_LIMIT, () -> entityLimitPerChunk, v -> entityLimitPerChunk = v));
+		register(Option.bool("entityLimit.naturalSpawning",
+			"The limit stops natural spawning (mobs appearing in the dark, animals, fish).",
+			() -> limitNaturalSpawning, v -> limitNaturalSpawning = v));
+		register(Option.bool("entityLimit.spawners",
+			"The limit stops monster spawners. A spawner at the limit waits its normal delay and tries again.",
+			() -> limitSpawners, v -> limitSpawners = v));
+		register(Option.bool("entityLimit.breeding",
+			"The limit stops breeding: animals and villagers making babies, and chicks hatching from thrown\n"
+				+ "eggs (chicken farms with dispensers). Animals that fail to breed lose their love mode;\n"
+				+ "villagers wait as if they had bred.",
+			() -> limitBreeding, v -> limitBreeding = v));
+
+		register(Option.bool("history.enabled",
+			"History: once per light profiler window (a minute by default) the average and longest tick, TPS,\n"
+				+ "players, entities, chunks and auto-tuning level are written to tickengine/history/<date>.jsonl.\n"
+				+ "Peaks also keep the heaviest mods, types and chunks. See it with '/tickengine history'.",
+			() -> historyEnabled, v -> historyEnabled = v));
+		register(Option.integer("history.keepDays",
+			"Days of history kept; older files are deleted by themselves. Range: 1-90.",
+			1, 90, () -> historyKeepDays, v -> historyKeepDays = v));
+		register(Option.integer("history.peakAverageMspt",
+			"A period is a peak when its average tick takes at least this many ms (50 = below 20 TPS).\n"
+				+ "Range: 1-10000.",
+			1, 10_000, () -> historyPeakAverageMspt, v -> historyPeakAverageMspt = v));
+		register(Option.integer("history.peakTickMs",
+			"A period is also a peak when one single tick takes at least this many ms (a freeze).\n"
+				+ "Range: 10-600000.",
+			10, 600_000, () -> historyPeakTickMs, v -> historyPeakTickMs = v));
+		register(Option.integer("history.peakTuningLevel",
+			"A period is also a peak when auto-tuning goes above this level. Range: 0-100.",
+			0, 100, () -> historyPeakTuningLevel, v -> historyPeakTuningLevel = v));
+		register(Option.bool("history.profilePeaks",
+			"Off by default. If you turn this on, a detailed profiler starts during peaks and uses some CPU\n"
+				+ "while it runs: it measures every tick for 60 s, at most once every 10 minutes, and the result\n"
+				+ "is kept in the history. Without it, peaks keep what the light profiler saw (one tick in 20).",
+			() -> historyProfilePeaks, v -> historyProfilePeaks = v));
+
 		register(Option.bool("compatibility.disableEntityThrottleWithServerCore",
 			"Turn off TickEngine's entity throttling while ServerCore's entity activation range is on, so\n"
 				+ "entities are not throttled twice. The profiler and block entity throttling keep running.",
@@ -541,6 +612,11 @@ public final class TickEngineConfig {
 				if (stacking != null && stacking.isJsonObject()) {
 					STACK_EXCLUDE.read(stacking.getAsJsonObject());
 				}
+				JsonElement entityLimit = root.get("entityLimit");
+				if (entityLimit != null && entityLimit.isJsonObject()) {
+					LIMIT_RULES.read(entityLimit.getAsJsonObject());
+					LIMIT_EXCLUDE.read(entityLimit.getAsJsonObject());
+				}
 			} catch (Exception e) {
 				TickEngine.LOGGER.error("Could not read {}: the file was NOT changed and the settings already in use (defaults at startup)"
 					+ " stay. Fix the error and run '/tickengine config reload'.", file(), e);
@@ -611,6 +687,11 @@ public final class TickEngineConfig {
 		} else if (section.equals("stacking")) {
 			out.append(",\n");
 			STACK_EXCLUDE.write(out);
+		} else if (section.equals("entityLimit")) {
+			out.append(",\n");
+			LIMIT_RULES.write(out);
+			out.append(",\n");
+			LIMIT_EXCLUDE.write(out);
 		}
 	}
 

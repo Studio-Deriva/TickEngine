@@ -39,10 +39,16 @@ see [Compatibility](#compatibility)).
   `/tickengine top`: the most expensive mods and types, with the slowest instance of each. Click one to
   teleport there. It covers block entities, entities, redstone and other scheduled block ticks, flowing
   water and lava, random ticks (crops, leaves), block events (pistons, note blocks) and chunk work.
+- **Heaviest chunks.** Tick time by chunk: which chunks (the farm, the machine room) cost the most,
+  split into block entities, entities and blocks, with the types that make them heavy. Click one to
+  teleport there. `/tickengine top chunks`.
 - **Chunk loading and generation.** How much server-thread time goes to loading, finishing, waiting for,
   unloading and saving chunks; how many chunks load from disk and how many are generated, and near which
   player; and which features and structures (and so which worldgen mods) take the most time on the
-  worldgen threads. `/tickengine top chunks`.
+  worldgen threads. `/tickengine top worldgen`.
+- **History of the last 7 days.** Every minute the average and longest tick, TPS, players, entities,
+  chunks and auto-tuning level go to a small file per day; lag peaks also keep the heaviest mods, types and
+  chunks. `/tickengine history` shows how the night went, `/tickengine history report` draws it.
 - **Detailed sessions and HTML reports.** `/tickengine profile start` measures every tick for a while,
   then prints the ranking and writes a self-contained HTML report (light and dark theme). Reports are
   written off the server thread, so a slow disk never causes lag.
@@ -68,6 +74,8 @@ see [Compatibility](#compatibility)).
   puts everything back.
 - **Entity stacking.** Experimental, off by default. Mobs of the same kind standing together become one
   mob that counts for up to 10: always, only in emergencies, or as the last auto-tuning level.
+- **Entity limit per chunk.** Off by default. Once a chunk holds 48 mobs of one type (or the number of
+  its rule), no more of that type spawn or are born there. Nothing already there is removed.
 - **Fully configurable, live.** A commented `config/tickengine.json5`, every option also settable by
   command and saved to the file.
 - **ServerCore aware.** If ServerCore already throttles entities or manages distances, TickEngine steps
@@ -108,7 +116,12 @@ Install it on the **server only**. Players don't need it, and it does nothing on
   random ticks and block events are timed per block or fluid. A scheduled tick includes the block updates
   it causes, so a repeater's time includes the redstone dust it powers. On 1.20.1, vanilla only
   random ticks chunks near a player, so force-loaded chunks with nobody near show no random ticks there.
-- **Chunks.** Server-thread chunk work is timed per sampled tick in four rows that add up: loading saved
+- **Heaviest chunks.** Every timed block entity, entity and block also counts for the chunk it was in
+  when it ticked, so `/tickengine top chunks` ranks chunks by tick time, split into block entities,
+  entities and blocks, with the three types that took most of it. A click goes to the slowest single call
+  in the chunk, which is usually the farm or machine itself. Chunk work (loading, saving) has no single
+  chunk and is not in this ranking.
+- **Chunk work.** Server-thread chunk work is timed per sampled tick in four rows that add up: loading saved
   chunks, finishing chunks and other chunk tasks, waiting for a chunk to load or generate, and unloading
   and saving. Chunk tasks that run between ticks, when the server has time to spare, do not raise MSPT
   and are shown apart, in ms per second. Counts (loaded from disk, started and finished generating, by
@@ -123,6 +136,32 @@ Install it on the **server only**. Players don't need it, and it does nothing on
   `output.webPublicAddress` (for example `play.example.com`); with the default `auto` they use `server-ip`
   from `server.properties`, or else the address the player typed to join. On a hosting panel, add the
   port as an extra port, or set `output.webServer` to false to keep the port closed.
+
+## History
+
+On by default (`history.enabled`). Once per light profiler window (`profiler.windowSeconds`, a minute by
+default) a line goes to `tickengine/history/<date>.jsonl`: the average and longest tick (every tick is
+timed, not only sampled ones), TPS, players, entities, loaded chunks, the highest auto-tuning level and
+whether emergency mode was on. Files older than `history.keepDays` (7) days are deleted by themselves.
+About 0.26 MB a day without peaks (a line is about 180 bytes, a peak about 1 KB); files are written off
+the server thread.
+
+A period is a **peak** when its average tick reaches `history.peakAverageMspt` (50 ms, below 20 TPS),
+one tick reaches `history.peakTickMs` (500 ms, a freeze), or auto-tuning goes above
+`history.peakTuningLevel` (5). A peak also keeps what the light profiler saw in that window: the five
+heaviest mods, types and chunks, with places to teleport to. The light profiler measures one tick in 20,
+so a single freeze always shows in the longest tick, but its cause may be missed.
+
+`history.profilePeaks` (off by default) makes a peak start a detailed session: if you turn it on, a
+detailed profiler runs during peaks and uses some CPU while it runs. It measures every tick for 60 s, at
+most once every 10 minutes, and the result is kept in the history. While it runs,
+`/tickengine profile start` says a session is already running.
+
+- `/tickengine history [hours]` (default 24): average tick, the worst period and the longest tick, and the
+  peaks, newest first. Click a peak for its mods, types and chunks.
+- `/tickengine history report [hours]`: an HTML page with a chart of the tick time and every peak.
+
+A server that is off, or does not tick for 30 s, leaves a gap, not a period at 0 TPS.
 
 ## How the network profiler works
 
@@ -331,6 +370,28 @@ that keep their own data about single mobs may not expect the copies made when a
 used. If you remove TickEngine, each stack stays one single mob: run `/tickengine stacking unstack`
 first, which splits every loaded stack back into single mobs.
 
+## Entity limit per chunk
+
+Off by default: `/tickengine limit enable`. Once a chunk holds `entityLimit.perChunk` (48) mobs of one
+type, new mobs of that type stop appearing there until some die or leave:
+
+- natural spawning (`entityLimit.naturalSpawning`) and monster spawners (`entityLimit.spawners`; a spawner
+  at the limit waits its normal delay and tries again). Minecraft 1.20.1 has no trial spawners;
+- breeding (`entityLimit.breeding`): two animals in love make no baby and lose their love mode,
+  villagers make no child and wait as if they had bred, and thrown eggs (chicken farms with dispensers)
+  hatch no chicks.
+
+Each source can be turned off on its own. Nothing already in the chunk is removed, a stack counts as one
+mob, and spawn eggs, dispensers placing mobs and commands are never stopped. Rules give a type or a whole
+mod its own limit (`/tickengine limit rules set 32 minecraft:chicken`, also per dimension), and
+`/tickengine limit exclude add <target>` leaves a type out entirely. `/tickengine limit` shows how many
+times each source was stopped and where the last one was.
+
+Counted are the loaded mobs of the type in the whole height of the chunk. Breeding is checked for the
+parents' type, so the rare babies of another type (a mule) count as their parents. Animals that make
+their babies another way (turtles, frogs and sniffers lay eggs, foxes breed through their own code) are
+not stopped.
+
 ## Configuration
 
 `config/tickengine.json5`, created on first start. Every option has a comment in the file; the main
@@ -351,7 +412,11 @@ ones:
   "emergency":     { "enabled": false, "triggerMspt": 150, "triggerSeconds": 30, "memoryPercent": 90,
                      "exitMspt": 60, "exitSeconds": 60, "interval": 20, "pauseMobSpawning": true },
   "stacking":      { "mode": "off", "maxSize": 10, "areaBlocks": 5,
-                     "exclude": ["minecraft:villager", "minecraft:wandering_trader"] }
+                     "exclude": ["minecraft:villager", "minecraft:wandering_trader"] },
+  "entityLimit":   { "enabled": false, "perChunk": 48, "naturalSpawning": true, "spawners": true,
+                     "breeding": true, "rules": {}, "exclude": [] },
+  "history":       { "enabled": true, "keepDays": 7, "peakAverageMspt": 50, "peakTickMs": 500,
+                     "peakTuningLevel": 5, "profilePeaks": false }
 }
 ```
 
@@ -364,10 +429,12 @@ overwritten: the settings in use are kept and the command tells you.
 | Command | What |
 |---------|------|
 | `/tickengine status` | MSPT, TPS, what the throttles and auto-tuning are doing |
-| `/tickengine top [mods\|blockentities\|entities\|blocks\|chunks]` | Most expensive mods and types from the light profiler. Click a type to teleport to its slowest instance. `blocks`: scheduled block and fluid ticks, random ticks and block events together. `chunks`: chunk work, chunk counts, and the slowest features, structures and worldgen mods. |
+| `/tickengine top [mods\|blockentities\|entities\|blocks\|chunks\|worldgen]` | Most expensive mods and types from the light profiler. Click a type to teleport to its slowest instance. `blocks`: scheduled block and fluid ticks, random ticks and block events together. `chunks`: chunks by tick time, click one to teleport there. `worldgen`: chunk work, chunk counts, and the slowest features, structures and worldgen mods. |
 | `/tickengine profile start [seconds]` | Detailed session: measures every tick, then prints results and writes an HTML report |
 | `/tickengine profile stop` | Stop the session early |
 | `/tickengine profile report` | HTML report from the light profiler |
+| `/tickengine history [hours]` | The last hours from the history: average, worst period, longest tick, peaks (click one for what took the time) |
+| `/tickengine history report [hours]` | HTML page of the history with a chart and every peak |
 | `/tickengine network` | Network profiler: whether a session runs, the last result |
 | `/tickengine network start [seconds]` / `stop` | Measure every packet sent for a while, then print results and write an HTML report |
 | `/tickengine network top [mods\|sources\|packets\|chunks]` / `report` | Show the last network result again, or write its HTML report again. Click a chunk to teleport there. |
@@ -391,6 +458,9 @@ overwritten: the settings in use are kept and the command tells you.
 | `/tickengine stacking mode <off\|emergency\|autoTuning\|always>` / `confirm <phrase>` | When stacking runs (anything but off after reading the warning and typing the phrase) |
 | `/tickengine stacking unstack` | Split every loaded stack back into single mobs |
 | `/tickengine stacking exclude add\|remove <target>` / `list` | Types or mods that are never stacked |
+| `/tickengine limit` / `enable` / `disable` | Entity limit per chunk: state, what it stops, how often it stopped something and where |
+| `/tickengine limit rules list\|set <limit> <target>\|set-in <dimension> <limit> <target>\|remove\|remove-in` | Limit per type or mod, optionally per dimension |
+| `/tickengine limit exclude add\|remove <target>` / `list` | Types or mods the limit never stops |
 
 ## Permissions
 

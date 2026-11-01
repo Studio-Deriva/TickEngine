@@ -15,6 +15,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.Util;
 
@@ -89,6 +90,10 @@ public final class HtmlReport {
 			+ "most redstone, including the dust they power), fluid ticks (flowing water and lava), random ticks "
 			+ "(crops, leaves, ice) and block events (pistons, note blocks).</p>\n");
 		kindTable(html, snapshot, snapshot.blockEntries());
+		html.append("<h2>Chunks by tick time</h2>\n<p class=\"muted\">Block entities, entities and blocks counted in "
+			+ "the chunk they were in when they ticked. &ldquo;Slowest at&rdquo; is where the slowest single call in the "
+			+ "chunk ran, usually the machine or farm that makes it heavy.</p>\n");
+		chunkTimeTable(html, snapshot);
 		chunks(html, snapshot);
 
 		html.append("""
@@ -209,10 +214,43 @@ public final class HtmlReport {
 		html.append("</table></div>\n");
 	}
 
+	private static void chunkTimeTable(StringBuilder html, ProfileSnapshot snapshot) {
+		List<ProfileSnapshot.ChunkEntry> chunks = snapshot.chunkTimes;
+		if (chunks.isEmpty()) {
+			html.append("<p class=\"muted\">No data.</p>\n");
+			return;
+		}
+		double top = snapshot.percentOfTick(chunks.get(0).totalNanos());
+		html.append("<div class=\"table-wrap\"><table>\n<tr><th>Dimension</th><th>Chunk</th><th>Slowest at</th>"
+			+ "<th>ms/tick</th><th>% of tick</th><th></th><th>Block entities</th><th>Entities</th><th>Blocks</th>"
+			+ "<th>Mostly</th></tr>\n");
+		for (ProfileSnapshot.ChunkEntry entry : chunks.subList(0, Math.min(MAX_ROWS, chunks.size()))) {
+			double percent = snapshot.percentOfTick(entry.totalNanos());
+			BlockPos pos = entry.worstPos();
+			html.append("<tr><td><code>").append(escape(entry.dimension().location().toString()))
+				.append("</code></td><td class=\"num\">").append(entry.x()).append(", ").append(entry.z())
+				.append("</td><td><code>").append(pos.getX()).append(' ').append(pos.getY()).append(' ').append(pos.getZ())
+				.append("</code></td><td class=\"num\">").append(format(snapshot.msPerTick(entry.totalNanos())))
+				.append("</td><td class=\"num\">").append(format(percent)).append("</td><td>");
+			bar(html, percent, top);
+			html.append("</td><td class=\"num\">").append(format(snapshot.msPerTick(entry.nanos(ProfileSnapshot.Category.BLOCK_ENTITY))))
+				.append("</td><td class=\"num\">").append(format(snapshot.msPerTick(entry.nanos(ProfileSnapshot.Category.ENTITY))))
+				.append("</td><td class=\"num\">").append(format(snapshot.msPerTick(entry.blockNanos())))
+				.append("</td><td><code>");
+			for (int i = 0; i < entry.topTypes().size(); i++) {
+				ProfileSnapshot.TypeShare type = entry.topTypes().get(i);
+				html.append(i == 0 ? "" : ", ").append(escape(type.id())).append(' ')
+					.append(format(entry.totalNanos() == 0 ? 0 : type.nanos() * 100.0 / entry.totalNanos())).append('%');
+			}
+			html.append("</code></td></tr>\n");
+		}
+		html.append("</table></div>\n");
+	}
+
 	/** Chunk work on the server thread, chunk counts, nearest players and worldgen times. */
 	private static void chunks(StringBuilder html, ProfileSnapshot snapshot) {
 		ChunkActivity chunks = snapshot.chunks;
-		html.append("<h2>Chunks</h2>\n");
+		html.append("<h2>Chunk loading and worldgen</h2>\n");
 		html.append("<div class=\"stats\">\n");
 		stat(html, "Loaded from disk", chunks.loaded() + " (" + format(snapshot.perSecond(chunks.loaded())) + "/s)");
 		stat(html, "Started generating", chunks.created() + " (" + format(snapshot.perSecond(chunks.created())) + "/s)");

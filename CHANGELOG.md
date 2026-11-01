@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.0-beta.10-pre-release+1.20.1-forge
+
+- **Profiler: heaviest chunks.** Block entities, entities and blocks also count for the chunk they tick
+  in, so `/tickengine top chunks` ranks chunks by tick time (block entities, entities and blocks apart,
+  the three types that took most of it, click to teleport to the slowest call there). Also in the HTML
+  report.
+- **Changed: `/tickengine top chunks` is now the chunk ranking.** Chunk loading, generation and worldgen
+  moved to `/tickengine top worldgen`, matching `/tickengine network top chunks`.
+- **Entity limit per chunk** (`/tickengine limit`, off by default). Once a chunk holds `entityLimit.perChunk`
+  (48) mobs of one type, natural spawning, spawners and breeding (animals, villagers, chicks from thrown
+  eggs) add no more of that type there. Each source can be turned off; rules per type, mod and dimension;
+  an exclude list. Nothing is removed, a stack counts as one mob, spawn eggs and commands are never
+  stopped. 1.20.1 has no trial spawners, so the Fabric option for them is not here.
+- **History of the last 7 days** (`history.*`, on by default). Once a minute (one light profiler window)
+  the average and longest tick, TPS, players, entities, chunks, auto-tuning level and emergency state go to
+  `tickengine/history/<date>.jsonl`; files older than `history.keepDays` are deleted. Peaks (average from
+  50 ms, a tick from 500 ms, or auto-tuning above level 5) also keep the heaviest mods, types and chunks.
+  `/tickengine history [hours]` in chat (click a peak for its details), `/tickengine history report` as
+  an HTML chart. `history.profilePeaks` (off by default) starts a 60 s detailed session during a peak, at
+  most once every 10 minutes.
+- **Fix: answers lost over RCON.** `/tickengine history`, `history report`, `history peak`, `profile report` and `network report` read or write files off the
+  server thread and answered a moment later, which RCON drops: it sends a command's output when the
+  command returns. Commands from the console or RCON now wait for the disk (at most 10 s) before
+  returning; players still get the answer without any wait.
+- Tested with GameTests (`./gradlew runGameTestServer`, 72 passing): chunk ranking, a spawner stopped at
+  the limit, breeding and thrown eggs stopped, the history keeping a peak, the new commands. The hooks
+  for natural spawning and villagers are in Forge's patched 1.20.1 code too (checked in the bytecode) but
+  not tested in game on Forge.
+
 ## 1.0.0-beta.9+1.20.1-forge
 
 - **HTML reports open in the browser with a click.** The "HTML report saved" line in chat now has an

@@ -95,7 +95,7 @@ class TickProfilerChunkTest {
 		ProfileSnapshot.Entry zombie = new ProfileSnapshot.Entry(ProfileSnapshot.Category.ENTITY, "minecraft:zombie",
 			"minecraft", 2_000_000, 10, 300_000, null, null);
 		ProfileSnapshot snapshot = new ProfileSnapshot("test", 0, 1000, 20, 100_000_000,
-			List.of(chunk, repeater, pipe, zombie), ChunkActivity.EMPTY);
+			List.of(chunk, repeater, pipe, zombie), ChunkActivity.EMPTY, List.of());
 
 		List<ProfileSnapshot.ModEntry> mods = snapshot.mods();
 		assertEquals(2, mods.size());

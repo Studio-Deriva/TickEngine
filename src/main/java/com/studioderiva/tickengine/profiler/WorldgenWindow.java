@@ -32,7 +32,7 @@ final class WorldgenWindow {
 			stats = new TypeStats();
 			features.put(feature, stats);
 		}
-		stats.add(nanos, level, pos);
+		stats.add(nanos, level == null ? null : level.dimension(), pos);
 	}
 
 	synchronized void addStructure(Structure structure, long nanos, Level level, BlockPos pos) {
@@ -41,7 +41,7 @@ final class WorldgenWindow {
 			stats = new TypeStats();
 			structures.put(structure, stats);
 		}
-		stats.add(nanos, level, pos);
+		stats.add(nanos, level == null ? null : level.dimension(), pos);
 	}
 
 	/** Called on the server thread; ids come from the server's registries (worldgen registries are not built-in). */

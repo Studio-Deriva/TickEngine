@@ -2,6 +2,7 @@ package com.studioderiva.tickengine.gametest;
 
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.limit.EntityLimit;
 import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.tuning.AutoTuner;
 import com.studioderiva.tickengine.tuning.EmergencyMode;
@@ -44,12 +45,16 @@ final class TestSupport {
 	private static final Map<String, ThrottleRules.EntityIntervals> ENTITY_RULES = new LinkedHashMap<>();
 
 	private static final List<String> STACK_EXCLUDE = new ArrayList<>();
+	private static final Map<String, Integer> LIMIT_RULES = new LinkedHashMap<>();
+	private static final List<String> LIMIT_EXCLUDE = new ArrayList<>();
 
 	static {
 		STACK_EXCLUDE.addAll(TickEngineConfig.STACK_EXCLUDE.targets());
 		TickEngineConfig.options().forEach((key, option) -> DEFAULTS.put(key, option.format()));
 		BLOCK_ENTITY_RULES.putAll(TickEngineConfig.BLOCK_ENTITY_RULES.rules());
 		ENTITY_RULES.putAll(TickEngineConfig.ENTITY_RULES.rules());
+		LIMIT_RULES.putAll(TickEngineConfig.LIMIT_RULES.rules());
+		LIMIT_EXCLUDE.addAll(TickEngineConfig.LIMIT_EXCLUDE.targets());
 	}
 
 	/** The default of a config option, as loaded at startup. */
@@ -62,7 +67,7 @@ final class TestSupport {
 
 	/**
 	 * Puts the config back to the defaults (rules as at startup, entities.spreadExclude empty,
-	 * stacking.exclude as at startup, no emergency), then applies the
+	 * stacking.exclude and the entity limit's rules and exclusions as at startup, no emergency), then applies the
 	 * given key/value pairs. The baseline
 	 * also turns off what would make results depend on timing or test order: auto-tuning (real
 	 * MSPT spikes at startup), waking new entities, tick spreading (it moves tick counters 5 s
@@ -85,6 +90,10 @@ final class TestSupport {
 		EntityStacker.reset();
 		restore(TickEngineConfig.BLOCK_ENTITY_RULES, BLOCK_ENTITY_RULES);
 		restore(TickEngineConfig.ENTITY_RULES, ENTITY_RULES);
+		restore(TickEngineConfig.LIMIT_RULES, LIMIT_RULES);
+		new ArrayList<>(TickEngineConfig.LIMIT_EXCLUDE.targets()).forEach(TickEngineConfig.LIMIT_EXCLUDE::remove);
+		LIMIT_EXCLUDE.forEach(TickEngineConfig.LIMIT_EXCLUDE::add);
+		EntityLimit.reset();
 		set("autoTuning.enabled", "false");
 		set("entities.wakeNewEntities", "false");
 		set("entities.spreadTicks", "false");

@@ -2,6 +2,7 @@ package com.studioderiva.tickengine.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -11,6 +12,9 @@ import com.studioderiva.tickengine.TickEngine;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.ThrottleRules;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.history.HistoryEntry;
+import com.studioderiva.tickengine.history.HistoryStore;
+import com.studioderiva.tickengine.limit.EntityLimit;
 import com.studioderiva.tickengine.network.NetworkProfiler;
 import com.studioderiva.tickengine.network.NetworkSnapshot;
 import com.studioderiva.tickengine.network.NetworkSource;
@@ -18,6 +22,7 @@ import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.ChunkActivity;
 import com.studioderiva.tickengine.profiler.ProfileSnapshot;
 import com.studioderiva.tickengine.profiler.TickProfiler;
+import com.studioderiva.tickengine.report.HistoryHtmlReport;
 import com.studioderiva.tickengine.report.HtmlReport;
 import com.studioderiva.tickengine.report.NetworkHtmlReport;
 import com.studioderiva.tickengine.report.ReportWebServer;
@@ -30,6 +35,8 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +44,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import com.studioderiva.tickengine.permission.TickEnginePermissions;
 import net.minecraft.ChatFormatting;
@@ -47,6 +60,7 @@ import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
@@ -63,8 +77,9 @@ import net.minecraft.world.level.levelgen.Heightmap;
  *
  * <pre>
  * /tickengine status
- * /tickengine top [mods|blockentities|entities|blocks|chunks]
+ * /tickengine top [mods|blockentities|entities|blocks|chunks|worldgen]
  * /tickengine profile start [seconds] | stop | report
+ * /tickengine history [hours] | report [hours] | peak &lt;time&gt;
  * /tickengine network [start [seconds] | stop | top [mods|sources|packets|chunks] | report]
  * /tickengine config list | get &lt;key&gt; | set &lt;key&gt; &lt;value&gt; | reload
  * /tickengine rules blockentities list | set &lt;interval&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;interval&gt; &lt;target&gt;
@@ -77,6 +92,10 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * /tickengine emergency [enable | disable | start | stop]
  * /tickengine stacking [mode &lt;mode&gt; | confirm &lt;phrase&gt; | unstack]
  * /tickengine stacking exclude list | add &lt;target&gt; | remove &lt;target&gt;
+ * /tickengine limit [enable | disable]
+ * /tickengine limit rules list | set &lt;limit&gt; &lt;target&gt; | set-in &lt;dimension&gt; &lt;limit&gt; &lt;target&gt;
+ *                       | remove &lt;target&gt; | remove-in &lt;dimension&gt; &lt;target&gt;
+ * /tickengine limit exclude list | add &lt;target&gt; | remove &lt;target&gt;
  * </pre>
  *
  * <p>Rule targets go last as greedy text because ids contain ':' which single-word
@@ -84,6 +103,10 @@ import net.minecraft.world.level.levelgen.Heightmap;
  */
 public final class TickEngineCommand {
 	private static final int DEFAULT_SESSION_SECONDS = 60;
+	private static final int DEFAULT_HISTORY_HOURS = 24;
+	/** How far after a peak a detailed session counts as its own. */
+	private static final long HISTORY_SESSION_AFTER_MILLIS = 3 * 60_000L;
+	private static final DateTimeFormatter HISTORY_TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
 	private TickEngineCommand() {
 	}
@@ -102,7 +125,18 @@ public final class TickEngineCommand {
 				.then(Commands.literal("blockentities").executes(context -> top(context, View.BLOCK_ENTITIES)))
 				.then(Commands.literal("entities").executes(context -> top(context, View.ENTITIES)))
 				.then(Commands.literal("blocks").executes(context -> top(context, View.BLOCKS)))
-				.then(Commands.literal("chunks").executes(context -> top(context, View.CHUNKS))))
+				.then(Commands.literal("chunks").executes(context -> top(context, View.CHUNKS)))
+				.then(Commands.literal("worldgen").executes(context -> top(context, View.WORLDGEN))))
+			.then(Commands.literal("history")
+				.requires(permission("top"))
+				.executes(context -> history(context, DEFAULT_HISTORY_HOURS))
+				.then(hoursArgument().executes(context -> history(context, IntegerArgumentType.getInteger(context, "hours"))))
+				.then(Commands.literal("report")
+					.executes(context -> historyReport(context, DEFAULT_HISTORY_HOURS))
+					.then(hoursArgument().executes(context -> historyReport(context, IntegerArgumentType.getInteger(context, "hours")))))
+				.then(Commands.literal("peak")
+					.then(Commands.argument("time", LongArgumentType.longArg(0))
+						.executes(TickEngineCommand::historyPeak))))
 			.then(Commands.literal("profile")
 				.requires(permission("profile"))
 				.then(Commands.literal("start")
@@ -198,7 +232,23 @@ public final class TickEngineCommand {
 						.then(Commands.argument("target", StringArgumentType.greedyString())
 							.suggests((context, builder) -> SharedSuggestionProvider.suggest(
 								TickEngineConfig.STACK_EXCLUDE.targets(), builder))
-							.executes(TickEngineCommand::stackExcludeRemove))))));
+							.executes(TickEngineCommand::stackExcludeRemove)))))
+			.then(Commands.literal("limit")
+				.requires(permission("config"))
+				.executes(TickEngineCommand::limitStatus)
+				.then(Commands.literal("enable").executes(context -> limitSet(context, true)))
+				.then(Commands.literal("disable").executes(context -> limitSet(context, false)))
+				.then(limitRules())
+				.then(Commands.literal("exclude")
+					.then(Commands.literal("list").executes(TickEngineCommand::limitExcludeList))
+					.then(Commands.literal("add")
+						.then(targetArgument(ForgeRegistries.ENTITY_TYPES.getKeys(), false)
+							.executes(TickEngineCommand::limitExcludeAdd)))
+					.then(Commands.literal("remove")
+						.then(Commands.argument("target", StringArgumentType.greedyString())
+							.suggests((context, builder) -> SharedSuggestionProvider.suggest(
+								TickEngineConfig.LIMIT_EXCLUDE.targets(), builder))
+							.executes(TickEngineCommand::limitExcludeRemove))))));
 	}
 
 	/** Permission node {@code tickengine.<name>}; falls back to the configured operator level. */
@@ -741,9 +791,286 @@ public final class TickEngineCommand {
 		return 1;
 	}
 
+	// --- entity limit ---
+
+	private static int limitStatus(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Entity limit per chunk"), false);
+		source.sendSuccess(() -> line("State", TickEngineConfig.entityLimitEnabled ? "on" : "off",
+			TickEngineConfig.entityLimitEnabled ? ChatFormatting.GREEN : ChatFormatting.GRAY), false);
+		source.sendSuccess(() -> line("Limit", "at most " + TickEngineConfig.entityLimitPerChunk + " mobs of one type per chunk; "
+			+ TickEngineConfig.LIMIT_RULES.rules().size() + " rules ('/tickengine limit rules list')", ChatFormatting.WHITE), false);
+		String stops = Stream.of(EntityLimit.Source.values()).filter(EntityLimit::limits)
+			.map(limited -> limited.displayName).collect(Collectors.joining(", "));
+		source.sendSuccess(() -> line("Stops", stops.isEmpty() ? "nothing (every source is off in the config)" : stops,
+			ChatFormatting.WHITE), false);
+		Set<String> excluded = TickEngineConfig.LIMIT_EXCLUDE.targets();
+		source.sendSuccess(() -> line("Excluded", (excluded.isEmpty() ? "nothing" : String.join(", ", excluded))
+			+ "; change with '/tickengine limit exclude'.", ChatFormatting.WHITE), false);
+		for (EntityLimit.Source limited : EntityLimit.Source.values()) {
+			long blocked = EntityLimit.blocked(limited);
+			EntityLimit.Blocked last = EntityLimit.lastBlocked(limited);
+			if (blocked == 0 || last == null) {
+				continue;
+			}
+			MutableComponent where = teleportLink(source, Component.literal(last.type().toString()).withStyle(ChatFormatting.WHITE),
+				last.dimension(), last.pos(), false, false, "Last stopped here, at the limit of " + last.limit());
+			source.sendSuccess(() -> Component.literal(" Stopped " + limited.displayName + ": ").withStyle(ChatFormatting.GRAY)
+				.append(Component.literal(blocked + " times").withStyle(ChatFormatting.WHITE))
+				.append(Component.literal(", last ").withStyle(ChatFormatting.GRAY)).append(where), false);
+		}
+		source.sendSuccess(() -> Component.literal(" Mobs already in a chunk are never removed, and a stack counts as one. "
+			+ "Spawn eggs, dispensers and commands are not stopped.").withStyle(ChatFormatting.GRAY), false);
+		source.sendSuccess(() -> Component.literal(TickEngineConfig.entityLimitEnabled
+			? " Turn it off with '/tickengine limit disable'."
+			: " Turn it on with '/tickengine limit enable'.").withStyle(ChatFormatting.GRAY), false);
+		return 1;
+	}
+
+	private static int limitSet(CommandContext<CommandSourceStack> context, boolean enabled) {
+		TickEngineConfig.entityLimitEnabled = enabled;
+		TickEngineConfig.changed();
+		context.getSource().sendSuccess(() -> Component.literal(enabled
+			? "Entity limit is on: a chunk with " + TickEngineConfig.entityLimitPerChunk + " mobs of one type (or its rule's "
+				+ "limit) gets no more of that type from spawning or breeding."
+			: "Entity limit is off.").withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static LiteralArgumentBuilder<CommandSourceStack> limitRules() {
+		ThrottleRules<Integer> rules = TickEngineConfig.LIMIT_RULES;
+		return Commands.literal("rules")
+			.then(Commands.literal("list").executes(context -> rulesList(context, "Entity limit rules", rules,
+				"Default", rules.type().describe(TickEngineConfig.entityLimitPerChunk), true)))
+			.then(Commands.literal("set")
+				.then(limitArgument()
+					.then(targetArgument(ForgeRegistries.ENTITY_TYPES.getKeys(), false)
+						.executes(context -> rulesSet(context, rules, IntegerArgumentType.getInteger(context, "limit"),
+							false, null, true)))))
+			.then(Commands.literal("set-in")
+				.then(Commands.argument("dimension", DimensionArgument.dimension())
+					.then(limitArgument()
+						.then(targetArgument(ForgeRegistries.ENTITY_TYPES.getKeys(), true)
+							.executes(context -> rulesSet(context, rules, IntegerArgumentType.getInteger(context, "limit"),
+								true, null, true))))))
+			.then(removeRule(rules, false))
+			.then(removeRule(rules, true));
+	}
+
+	private static RequiredArgumentBuilder<CommandSourceStack, Integer> limitArgument() {
+		return Commands.argument("limit", IntegerArgumentType.integer(1, ThrottleRules.MAX_LIMIT));
+	}
+
+	private static int limitExcludeList(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		source.sendSuccess(() -> header("Excluded from the entity limit"), false);
+		Set<String> excluded = TickEngineConfig.LIMIT_EXCLUDE.targets();
+		if (excluded.isEmpty()) {
+			source.sendSuccess(() -> Component.literal(" nothing listed").withStyle(ChatFormatting.GRAY), false);
+		}
+		excluded.forEach(target -> source.sendSuccess(() -> Component.literal(" " + target).withStyle(ChatFormatting.WHITE), false));
+		return 1;
+	}
+
+	private static int limitExcludeAdd(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		String error = TickEngineConfig.LIMIT_EXCLUDE.add(target);
+		if (error != null) {
+			source.sendFailure(Component.literal(error));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("Excluded from the entity limit: " + target + ".")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	private static int limitExcludeRemove(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		String target = StringArgumentType.getString(context, "target").trim();
+		if (!TickEngineConfig.LIMIT_EXCLUDE.remove(target)) {
+			source.sendFailure(Component.literal("'" + target + "' is not excluded from the entity limit."));
+			return 0;
+		}
+		TickEngineConfig.changed();
+		source.sendSuccess(() -> Component.literal("No longer excluded from the entity limit: " + target + ".")
+			.withStyle(ChatFormatting.GREEN), true);
+		return 1;
+	}
+
+	// --- history ---
+
+	private static RequiredArgumentBuilder<CommandSourceStack, Integer> hoursArgument() {
+		// Up to the most days the history can keep.
+		return Commands.argument("hours", IntegerArgumentType.integer(1, 90 * 24));
+	}
+
+	/** Reads the history on the IO pool, then runs {@code show} on the server thread. */
+	private static void readHistory(CommandSourceStack source, long fromMillis, long toMillis,
+		Consumer<List<HistoryEntry>> show) {
+		afterIo(source, true, HistoryStore.read(fromMillis, toMillis), (entries, error) -> {
+			if (error != null) {
+				TickEngine.LOGGER.error("Could not read the history", error);
+				source.sendFailure(Component.literal("Could not read the history, see the server log."));
+			} else {
+				show.accept(entries);
+			}
+		});
+	}
+
+	private static int history(CommandContext<CommandSourceStack> context, int hours) {
+		CommandSourceStack source = context.getSource();
+		long now = System.currentTimeMillis();
+		readHistory(source, now - hours * 3_600_000L, now, entries -> printHistory(source, entries, hours));
+		return 1;
+	}
+
+	private static void printHistory(CommandSourceStack source, List<HistoryEntry> entries, int hours) {
+		List<HistoryEntry> periods = entries.stream().filter(entry -> entry.kind().equals(HistoryEntry.PERIOD)).toList();
+		source.sendSuccess(() -> header("History, last " + hours + " h"), false);
+		if (periods.isEmpty()) {
+			source.sendSuccess(() -> Component.literal(TickEngineConfig.historyEnabled
+				? " Nothing recorded yet: the first line is written after a minute."
+				: " The history is off. Turn it on with '/tickengine config set history.enabled true'.")
+				.withStyle(ChatFormatting.GRAY), false);
+			return;
+		}
+		long ticks = periods.stream().mapToLong(HistoryEntry::ticks).sum();
+		double average = ticks == 0 ? 0 : periods.stream().mapToDouble(entry -> entry.avgMs() * entry.ticks()).sum() / ticks;
+		HistoryEntry worst = periods.stream().max((a, b) -> Double.compare(a.avgMs(), b.avgMs())).orElseThrow();
+		HistoryEntry longest = periods.stream().max((a, b) -> Double.compare(a.maxMs(), b.maxMs())).orElseThrow();
+		source.sendSuccess(() -> line("Recorded", periods.size() + " periods, " + historyTime(periods.get(0).startMillis())
+			+ " to " + historyTime(periods.get(periods.size() - 1).endMillis()), ChatFormatting.WHITE), false);
+		source.sendSuccess(() -> line("Average tick", format(average) + " ms", msptColor(average)), false);
+		source.sendSuccess(() -> Component.literal(" Worst: ").withStyle(ChatFormatting.GRAY)
+			.append(peakLink(worst, "average " + format(worst.avgMs()) + " ms at " + historyTime(worst.endMillis())))
+			.append(Component.literal(", longest tick ").withStyle(ChatFormatting.GRAY))
+			.append(peakLink(longest, format(longest.maxMs()) + " ms at " + historyTime(longest.endMillis()))), false);
+		List<HistoryEntry> peaks = new ArrayList<>(periods.stream().filter(HistoryEntry::isPeak).toList());
+		Collections.reverse(peaks);
+		source.sendSuccess(() -> Component.literal("Peaks: " + peaks.size()).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD)
+			.append(Component.literal(peaks.isEmpty() ? "" : " (newest first, click one for what took the time)")
+				.withStyle(ChatFormatting.GRAY)), false);
+		for (HistoryEntry peak : peaks.subList(0, Math.min(TickEngineConfig.chatTopEntries, peaks.size()))) {
+			String mostly = peak.detail() == null || peak.detail().mods().isEmpty() ? ""
+				: "  mostly " + peak.detail().mods().get(0).name();
+			source.sendSuccess(() -> Component.literal(" ").append(peakLink(peak, historyTime(peak.endMillis())))
+				.append(Component.literal("  avg " + format(peak.avgMs()) + " ms, longest " + format(peak.maxMs())
+					+ " ms, auto-tuning " + peak.tuningLevel() + (peak.emergency() ? ", emergency" : ""))
+					.withStyle(msptColor(peak.avgMs())))
+				.append(Component.literal(mostly).withStyle(ChatFormatting.DARK_GRAY)), false);
+		}
+		long sessions = entries.stream().filter(entry -> entry.kind().equals(HistoryEntry.SESSION)).count();
+		if (sessions > 0) {
+			source.sendSuccess(() -> line("Detailed sessions during peaks", Long.toString(sessions), ChatFormatting.WHITE), false);
+		}
+		String command = "/tickengine history report " + hours;
+		source.sendSuccess(() -> Component.literal(" Chart and every peak: ").withStyle(ChatFormatting.GRAY)
+			.append(Component.literal(command).withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
+				.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command)))), false);
+	}
+
+	private static MutableComponent peakLink(HistoryEntry entry, String text) {
+		String command = "/tickengine history peak " + entry.endMillis();
+		return Component.literal(text).withStyle(style -> style.withColor(ChatFormatting.WHITE).withUnderlined(true)
+			.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+			.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click for what took the time"))));
+	}
+
+	private static String historyTime(long millis) {
+		return HISTORY_TIME.format(Instant.ofEpochMilli(millis));
+	}
+
+	private static int historyPeak(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		long time = LongArgumentType.getLong(context, "time");
+		// The period itself, and the detailed sessions that ran during it or up to a few minutes after it.
+		readHistory(source, time - HISTORY_SESSION_AFTER_MILLIS - 3_600_000L, time + HISTORY_SESSION_AFTER_MILLIS, entries -> {
+			HistoryEntry period = entries.stream().filter(entry -> entry.endMillis() == time).findFirst().orElse(null);
+			if (period == null) {
+				source.sendFailure(Component.literal("Nothing in the history at that time (it may have been deleted)."));
+				return;
+			}
+			printHistoryEntry(source, period);
+			entries.stream().filter(entry -> entry.kind().equals(HistoryEntry.SESSION) && entry != period
+					&& entry.endMillis() > period.startMillis() && entry.startMillis() < time + HISTORY_SESSION_AFTER_MILLIS)
+				.forEach(session -> printHistoryEntry(source, session));
+		});
+		return 1;
+	}
+
+	private static void printHistoryEntry(CommandSourceStack source, HistoryEntry entry) {
+		String title = (entry.kind().equals(HistoryEntry.SESSION) ? "Detailed session ending " : "Period ending ")
+			+ historyTime(entry.endMillis()) + " (" + entry.seconds() + " s)";
+		source.sendSuccess(() -> header(title), false);
+		source.sendSuccess(() -> line("Ticks", "average " + format(entry.avgMs()) + " ms, longest " + format(entry.maxMs())
+			+ " ms, TPS " + format(entry.tps()), msptColor(entry.avgMs())), false);
+		source.sendSuccess(() -> line("Server", entry.players() + " players, " + entry.entities() + " entities, "
+			+ entry.chunks() + " chunks, auto-tuning " + entry.tuningLevel() + (entry.emergency() ? ", emergency mode" : ""),
+			ChatFormatting.WHITE), false);
+		if (entry.isPeak()) {
+			source.sendSuccess(() -> line("Peak because of", String.join(", ", entry.peaks()), ChatFormatting.YELLOW), false);
+		}
+		HistoryEntry.Detail detail = entry.detail();
+		if (detail == null) {
+			source.sendSuccess(() -> Component.literal(entry.isPeak()
+				? " No profiler data for this period (the light profiler was off or had not finished a window)."
+				: " Not a peak: only peaks keep what took the time.").withStyle(ChatFormatting.GRAY), false);
+			return;
+		}
+		source.sendSuccess(() -> Component.literal(" From the " + detail.source()
+			+ (detail.source().equals("light profiler") ? " (one tick in 20)" : "")).withStyle(ChatFormatting.GRAY), false);
+		title(source, "Mods");
+		detail.mods().forEach(mod -> source.sendSuccess(() -> Component.literal("  " + mod.name()).withStyle(ChatFormatting.WHITE)
+			.append(Component.literal("  " + format(mod.msPerTick()) + " ms/tick").withStyle(ChatFormatting.GRAY)), false));
+		title(source, "Types");
+		for (HistoryEntry.Type type : detail.types()) {
+			MutableComponent name = Component.literal(type.id()).withStyle(ChatFormatting.WHITE);
+			if (type.dimension() != null) {
+				name = teleportLink(source, name, dimensionKey(type.dimension()), new BlockPos(type.x(), type.y(), type.z()),
+					!type.category().equals(ProfileSnapshot.Category.ENTITY.displayName), false, "Slowest instance in that period");
+			}
+			MutableComponent finalName = name;
+			source.sendSuccess(() -> Component.literal("  ").append(finalName)
+				.append(Component.literal(" " + type.category().toLowerCase(Locale.ROOT)).withStyle(ChatFormatting.DARK_AQUA))
+				.append(Component.literal("  " + format(type.msPerTick()) + " ms/tick").withStyle(ChatFormatting.GRAY)), false);
+		}
+		title(source, "Chunks");
+		for (HistoryEntry.Chunk chunk : detail.chunks()) {
+			MutableComponent name = teleportLink(source,
+				Component.literal(chunk.dimension() + " " + chunk.x() + " " + chunk.z()).withStyle(ChatFormatting.WHITE),
+				dimensionKey(chunk.dimension()), new BlockPos(chunk.x(), chunk.y(), chunk.z()), chunk.onTop(), false,
+				"Chunk " + chunk.chunkX() + ", " + chunk.chunkZ() + "\nMostly: " + chunk.top());
+			source.sendSuccess(() -> Component.literal("  ").append(name)
+				.append(Component.literal(" " + chunk.top()).withStyle(ChatFormatting.DARK_GRAY))
+				.append(Component.literal("  " + format(chunk.msPerTick()) + " ms/tick").withStyle(ChatFormatting.GRAY)), false);
+		}
+	}
+
+	private static ResourceKey<Level> dimensionKey(String id) {
+		return ResourceKey.create(Registries.DIMENSION, new ResourceLocation(id));
+	}
+
+	private static int historyReport(CommandContext<CommandSourceStack> context, int hours) {
+		CommandSourceStack source = context.getSource();
+		MinecraftServer server = source.getServer();
+		long now = System.currentTimeMillis();
+		readHistory(source, now - hours * 3_600_000L, now, entries -> afterIo(source, true,
+			HistoryHtmlReport.writeAsync(server, entries, hours, now), (file, error) -> {
+				if (error != null) {
+					TickEngine.LOGGER.error("Could not write the history report", error);
+					source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
+				} else {
+					sendReportSaved(server, source, file);
+				}
+			}));
+		return 1;
+	}
+
 	// --- top ---
 
-	private enum View { ALL, MODS, BLOCK_ENTITIES, ENTITIES, BLOCKS, CHUNKS }
+	private enum View { ALL, MODS, BLOCK_ENTITIES, ENTITIES, BLOCKS, CHUNKS, WORLDGEN }
 
 	private static int top(CommandContext<CommandSourceStack> context, View view) {
 		CommandSourceStack source = context.getSource();
@@ -777,7 +1104,10 @@ public final class TickEngineCommand {
 				"Blocks (scheduled ticks, random ticks, block events)", true);
 		}
 		if (view == View.ALL || view == View.CHUNKS) {
-			printChunks(source, snapshot, view == View.CHUNKS);
+			printChunkTimes(source, snapshot);
+		}
+		if (view == View.ALL || view == View.WORLDGEN) {
+			printChunkLoading(source, snapshot, view == View.WORLDGEN);
 		}
 	}
 
@@ -852,13 +1182,53 @@ public final class TickEngineCommand {
 	}
 
 	/**
+	 * Chunks by tick time spent in them. A click goes to the slowest single call in the chunk, which
+	 * is where its farm or machine is, unlike the chunk center.
+	 */
+	private static void printChunkTimes(CommandSourceStack source, ProfileSnapshot snapshot) {
+		source.sendSuccess(() -> Component.literal("Chunks").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
+		List<ProfileSnapshot.ChunkEntry> chunks = snapshot.chunkTimes;
+		if (chunks.isEmpty()) {
+			source.sendSuccess(() -> Component.literal("  no data").withStyle(ChatFormatting.GRAY), false);
+		}
+		for (int i = 0; i < Math.min(TickEngineConfig.chatTopEntries, chunks.size()); i++) {
+			ProfileSnapshot.ChunkEntry entry = chunks.get(i);
+			int rank = i + 1;
+			BlockPos pos = entry.worstPos();
+			String dimension = entry.dimension().location().toString();
+			StringBuilder hover = new StringBuilder("Chunk ").append(entry.x()).append(", ").append(entry.z());
+			chunkPart(hover, snapshot, "Block entities", entry.nanos(ProfileSnapshot.Category.BLOCK_ENTITY));
+			chunkPart(hover, snapshot, "Entities", entry.nanos(ProfileSnapshot.Category.ENTITY));
+			chunkPart(hover, snapshot, "Blocks", entry.blockNanos());
+			hover.append("\nMostly:");
+			entry.topTypes().forEach(type -> hover.append("\n ").append(type.id()).append("  ")
+				.append(format(entry.totalNanos() == 0 ? 0 : type.nanos() * 100.0 / entry.totalNanos())).append('%'));
+			// Land on top of a block (entity) instead of inside it, where a player would suffocate.
+			boolean block = entry.worstCategory() != ProfileSnapshot.Category.ENTITY;
+			MutableComponent name = teleportLink(source,
+				Component.literal(dimension + " " + pos.getX() + " " + pos.getZ()).withStyle(ChatFormatting.WHITE),
+				entry.dimension(), pos, block, false, hover.toString());
+			String top = entry.topTypes().isEmpty() ? "" : " " + entry.topTypes().get(0).id();
+			source.sendSuccess(() -> Component.literal(" " + rank + ". ").withStyle(ChatFormatting.GRAY).append(name)
+				.append(Component.literal(top).withStyle(ChatFormatting.DARK_GRAY))
+				.append(timing(snapshot, entry.totalNanos())), false);
+		}
+	}
+
+	private static void chunkPart(StringBuilder hover, ProfileSnapshot snapshot, String label, long nanos) {
+		if (nanos > 0) {
+			hover.append('\n').append(label).append(": ").append(format(snapshot.msPerTick(nanos))).append(" ms/tick");
+		}
+	}
+
+	/**
 	 * Chunk work on the server thread (per sampled tick), then loading and generation over the whole
 	 * window. {@code detailed}: also the slowest features and structures and the worldgen mods.
 	 */
-	private static void printChunks(CommandSourceStack source, ProfileSnapshot snapshot, boolean detailed) {
+	private static void printChunkLoading(CommandSourceStack source, ProfileSnapshot snapshot, boolean detailed) {
 		ChunkActivity chunks = snapshot.chunks;
 		List<ProfileSnapshot.Entry> work = snapshot.entries(ProfileSnapshot.Category.CHUNK);
-		source.sendSuccess(() -> Component.literal("Chunks").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
+		source.sendSuccess(() -> Component.literal("Chunk loading and worldgen").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), false);
 		if (work.isEmpty() && chunks.isEmpty()) {
 			source.sendSuccess(() -> Component.literal("  no chunk loaded, generated or saved").withStyle(ChatFormatting.GRAY), false);
 			return;
@@ -899,7 +1269,7 @@ public final class TickEngineCommand {
 		}
 		if (!detailed) {
 			if (features > 0 || structures > 0 || chunks.generated() > 0) {
-				source.sendSuccess(() -> Component.literal("  Slowest features and structures: /tickengine top chunks")
+				source.sendSuccess(() -> Component.literal("  Slowest features and structures: /tickengine top worldgen")
 					.withStyle(ChatFormatting.DARK_GRAY), false);
 			}
 			return;
@@ -1011,7 +1381,7 @@ public final class TickEngineCommand {
 			return;
 		}
 		printSnapshot(source, result, View.ALL);
-		writeReport(server, source, result);
+		writeReport(server, source, result, false);
 	}
 
 	private static int lightReport(CommandContext<CommandSourceStack> context) {
@@ -1021,19 +1391,48 @@ public final class TickEngineCommand {
 			source.sendFailure(Component.literal("No light profiler data yet."));
 			return 0;
 		}
-		writeReport(source.getServer(), source, snapshot);
+		writeReport(source.getServer(), source, snapshot, true);
 		return 1;
 	}
 
-	private static void writeReport(MinecraftServer server, CommandSourceStack source, ProfileSnapshot snapshot) {
-		HtmlReport.writeAsync(server, snapshot).whenComplete((file, error) -> server.execute(() -> {
+	private static void writeReport(MinecraftServer server, CommandSourceStack source, ProfileSnapshot snapshot, boolean inCommand) {
+		afterIo(source, inCommand, HtmlReport.writeAsync(server, snapshot), (file, error) -> {
 			if (error != null) {
 				TickEngine.LOGGER.error("Could not write HTML report", error);
 				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
 			} else {
 				sendReportSaved(server, source, file);
 			}
-		}));
+		});
+	}
+
+	/** Longest a console command waits for the disk; past it the result still comes, but too late for RCON. */
+	private static final long IO_WAIT_SECONDS = 10;
+
+	/**
+	 * Runs {@code then} on the server thread once {@code work} (disk work on the IO pool) is done.
+	 * RCON sends a command's output when the command returns and drops anything later, so a command
+	 * from the console or RCON ({@code inCommand}, no player) waits for the disk before it returns: a
+	 * short stall, only for those commands. Players, and results of sessions that end later, get it a
+	 * moment later without any wait.
+	 */
+	private static <T> void afterIo(CommandSourceStack source, boolean inCommand, CompletableFuture<T> work,
+		BiConsumer<T, Throwable> then) {
+		MinecraftServer server = source.getServer();
+		if (inCommand && source.getEntity() == null) {
+			try {
+				then.accept(work.get(IO_WAIT_SECONDS, TimeUnit.SECONDS), null);
+				return;
+			} catch (ExecutionException e) {
+				then.accept(null, e.getCause());
+				return;
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			} catch (TimeoutException e) {
+				// A slow disk: answer when the work is done, like for players.
+			}
+		}
+		work.whenComplete((value, error) -> server.execute(() -> then.accept(value, error)));
 	}
 
 	/** The saved path, as a link to open in the browser when the report web server runs. */
@@ -1108,7 +1507,7 @@ public final class TickEngineCommand {
 			return;
 		}
 		printNetwork(source, result, NetworkView.ALL);
-		writeNetworkReport(server, source, result);
+		writeNetworkReport(server, source, result, false);
 	}
 
 	private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
@@ -1149,7 +1548,7 @@ public final class TickEngineCommand {
 		if (snapshot == null) {
 			return 0;
 		}
-		writeNetworkReport(source.getServer(), source, snapshot);
+		writeNetworkReport(source.getServer(), source, snapshot, true);
 		return 1;
 	}
 
@@ -1256,15 +1655,16 @@ public final class TickEngineCommand {
 			.append(Component.literal(" (" + format(percent) + "%)").withStyle(ChatFormatting.GRAY)), false);
 	}
 
-	private static void writeNetworkReport(MinecraftServer server, CommandSourceStack source, NetworkSnapshot snapshot) {
-		NetworkHtmlReport.writeAsync(server, snapshot).whenComplete((file, error) -> server.execute(() -> {
+	private static void writeNetworkReport(MinecraftServer server, CommandSourceStack source, NetworkSnapshot snapshot,
+		boolean inCommand) {
+		afterIo(source, inCommand, NetworkHtmlReport.writeAsync(server, snapshot), (file, error) -> {
 			if (error != null) {
 				TickEngine.LOGGER.error("Could not write the network HTML report", error);
 				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
 			} else {
 				sendReportSaved(server, source, file);
 			}
-		}));
+		});
 	}
 
 	// --- config ---

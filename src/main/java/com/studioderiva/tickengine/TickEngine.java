@@ -3,6 +3,9 @@ package com.studioderiva.tickengine;
 import com.studioderiva.tickengine.command.TickEngineCommand;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.history.HistoryRecorder;
+import com.studioderiva.tickengine.history.HistoryStore;
+import com.studioderiva.tickengine.limit.EntityLimit;
 import com.studioderiva.tickengine.network.NetworkProfiler;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.permission.TickEnginePermissions;
@@ -44,6 +47,7 @@ public final class TickEngine {
 		bus.addListener((TickEvent.ServerTickEvent event) -> {
 			if (event.phase == TickEvent.Phase.START) {
 				TickProfiler.onTickStart(event.getServer());
+				HistoryRecorder.onTickStart();
 				AutoTuner.onTickStart();
 				EmergencyMode.onTickStart();
 			} else {
@@ -57,11 +61,14 @@ public final class TickEngine {
 				AutoTuner.onTickEnd(event.getServer());
 				EntityStacker.onTickEnd(event.getServer());
 				AdminNotices.tick(event.getServer());
+				// Last, so the period sees this tick's auto-tuning level and emergency state.
+				HistoryRecorder.onTickEnd(event.getServer());
 			}
 		});
 		bus.addListener((ServerStartedEvent event) -> {
 			ServerCoreCompat.refresh();
 			ReportWebServer.refresh(event.getServer());
+			HistoryStore.configure(event.getServer().getServerDirectory().toPath());
 		});
 		// Before worlds save, so the original distances are back in place.
 		bus.addListener((ServerStoppingEvent event) -> {
@@ -74,6 +81,8 @@ public final class TickEngine {
 			BlockEntityThrottle.reset();
 			EntityThrottle.reset();
 			EntityStacker.reset();
+			EntityLimit.reset();
+			HistoryRecorder.reset();
 			AdminNotices.reset();
 			ReportWebServer.stop();
 		});

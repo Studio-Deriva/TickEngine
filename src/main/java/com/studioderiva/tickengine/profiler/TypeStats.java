@@ -12,15 +12,15 @@ final class TypeStats {
 	BlockPos worstPos;
 	ResourceKey<Level> worstDimension;
 
-	/** {@code level} and {@code pos} may be null for work that has no single place, like chunk saving. */
-	void add(long nanos, Level level, BlockPos pos) {
+	/** {@code dimension} and {@code pos} may be null for work that has no single place, like chunk saving. */
+	void add(long nanos, ResourceKey<Level> dimension, BlockPos pos) {
 		totalNanos += nanos;
 		calls++;
 		if (nanos > worstNanos) {
 			worstNanos = nanos;
 			// BlockPos.MutableBlockPos instances can be reused by the caller.
 			worstPos = pos == null ? null : pos.immutable();
-			worstDimension = level == null ? null : level.dimension();
+			worstDimension = dimension;
 		}
 	}
 }

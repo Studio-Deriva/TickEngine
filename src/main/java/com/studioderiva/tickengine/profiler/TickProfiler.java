@@ -4,6 +4,7 @@ import com.studioderiva.tickengine.config.TickEngineConfig;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -120,11 +121,12 @@ public final class TickProfiler {
 	 * fluid random ticks.
 	 */
 	public static void record(ProfileSnapshot.Category category, Object key, long nanos, Level level, BlockPos pos) {
+		ResourceKey<Level> dimension = level == null ? null : level.dimension();
 		if (lightSample) {
-			lightWindow.add(category, key, nanos, level, pos);
+			lightWindow.add(category, key, nanos, dimension, pos);
 		}
 		if (session != null) {
-			session.add(category, key, nanos, level, pos);
+			session.add(category, key, nanos, dimension, pos);
 		}
 	}
 
@@ -248,6 +250,11 @@ public final class TickProfiler {
 			return lastLightSnapshot;
 		}
 		return lightWindow.sampledTicks() > 0 ? lightWindow.snapshot("Light profiler, current window", registries()) : null;
+	}
+
+	/** The last complete light profiler window, or null before the first one ends. A new object each window. */
+	public static ProfileSnapshot lastCompleteWindow() {
+		return lastLightSnapshot;
 	}
 
 	public static boolean isSessionRunning() {

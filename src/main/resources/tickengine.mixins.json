@@ -5,6 +5,8 @@
 	"minVersion": "0.8",
 	"compatibilityLevel": "JAVA_17",
 	"server": [
+		"AnimalBreedingMixin",
+		"BaseSpawnerMixin",
 		"BlockableEventLoopMixin",
 		"BoundTickingBlockEntityMixin",
 		"ChunkDataReadMixin",
@@ -30,7 +32,9 @@
 		"ServerHandshakeMixin",
 		"ServerLevelMixin",
 		"StructureStartMixin",
-		"TrackedEntityMixin"
+		"ThrownEggMixin",
+		"TrackedEntityMixin",
+		"VillagerMakeLoveMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

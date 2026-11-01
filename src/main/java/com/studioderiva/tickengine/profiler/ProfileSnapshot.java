@@ -43,6 +43,36 @@ public final class ProfileSnapshot {
 		long worstNanos, BlockPos worstPos, ResourceKey<Level> worstDimension) {
 	}
 
+	/**
+	 * Tick time spent in one chunk: block entities, entities and blocks there, counted where they
+	 * were when they ticked. Chunk work (loading, saving) has no single chunk and is left out.
+	 *
+	 * @param categoryNanos time by {@link Category}, indexed by ordinal
+	 * @param topTypes the types that took most of the time here, highest first
+	 * @param worstPos where the slowest single call in this chunk happened, to teleport to
+	 * @param worstCategory what ran at {@code worstPos}
+	 */
+	public record ChunkEntry(ResourceKey<Level> dimension, int x, int z, long totalNanos, long[] categoryNanos,
+		List<TypeShare> topTypes, BlockPos worstPos, Category worstCategory) {
+
+		public long nanos(Category category) {
+			return categoryNanos[category.ordinal()];
+		}
+
+		/** Scheduled block and fluid ticks, random ticks and block events together. */
+		public long blockNanos() {
+			long nanos = 0;
+			for (Category category : BLOCK_CATEGORIES) {
+				nanos += nanos(category);
+			}
+			return nanos;
+		}
+	}
+
+	/** One type's time inside a chunk. */
+	public record TypeShare(Category category, String id, long nanos) {
+	}
+
 	/** Time of every type from one mod, grouped by registry namespace. */
 	public record ModEntry(String namespace, String displayName, long totalNanos, long calls, int types) {
 	}
@@ -54,9 +84,11 @@ public final class ProfileSnapshot {
 	public final long sampledTickNanos;
 	public final List<Entry> entries;
 	public final ChunkActivity chunks;
+	/** Chunks by tick time spent in them, highest first. */
+	public final List<ChunkEntry> chunkTimes;
 
 	ProfileSnapshot(String label, long startMillis, long durationMillis, long sampledTicks, long sampledTickNanos,
-		List<Entry> entries, ChunkActivity chunks) {
+		List<Entry> entries, ChunkActivity chunks, List<ChunkEntry> chunkTimes) {
 		this.label = label;
 		this.startMillis = startMillis;
 		this.durationMillis = durationMillis;
@@ -66,6 +98,9 @@ public final class ProfileSnapshot {
 		sorted.sort(Comparator.comparingLong(Entry::totalNanos).reversed());
 		this.entries = List.copyOf(sorted);
 		this.chunks = chunks;
+		List<ChunkEntry> sortedChunks = new ArrayList<>(chunkTimes);
+		sortedChunks.sort(Comparator.comparingLong(ChunkEntry::totalNanos).reversed());
+		this.chunkTimes = List.copyOf(sortedChunks);
 	}
 
 	public boolean isEmpty() {
