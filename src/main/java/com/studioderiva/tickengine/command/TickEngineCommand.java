@@ -22,11 +22,13 @@ import com.studioderiva.tickengine.profiler.TickProfiler;
 import com.studioderiva.tickengine.report.DiagnosticReport;
 import com.studioderiva.tickengine.report.HtmlReport;
 import com.studioderiva.tickengine.report.NetworkHtmlReport;
+import com.studioderiva.tickengine.report.ReportWebServer;
 import com.studioderiva.tickengine.stacking.EntityStacker;
 import com.studioderiva.tickengine.throttle.BlockEntityThrottle;
 import com.studioderiva.tickengine.throttle.EntityThrottle;
 import com.studioderiva.tickengine.tuning.AutoTuner;
 import com.studioderiva.tickengine.tuning.EmergencyMode;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -1041,11 +1043,28 @@ public final class TickEngineCommand {
 				TickEngine.LOGGER.error("Could not write HTML report", error);
 				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
 			} else {
-				String path = server.getServerDirectory().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
-				source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
-					.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
+				sendReportSaved(server, source, file);
 			}
 		}));
+	}
+
+	/** The saved path, as a link to open in the browser when the report web server runs. */
+	private static void sendReportSaved(MinecraftServer server, CommandSourceStack source, Path file) {
+		String path = server.getServerDirectory().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
+		String link = ReportWebServer.link(source, file);
+		if (link == null) {
+			source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
+				.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
+			return;
+		}
+		source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
+			.append(Component.literal("[open in browser]").withStyle(style -> style.withColor(ChatFormatting.AQUA)
+				.withUnderlined(true).withClickEvent(MinecraftCompat.openUrl(link))
+				.withHoverEvent(MinecraftCompat.showText(Component.literal(link)))))
+			.append(Component.literal(" " + path).withStyle(ChatFormatting.GRAY)), false);
+		if (source.getEntity() == null) {
+			source.sendSuccess(() -> Component.literal(" " + link).withStyle(ChatFormatting.GRAY), false);
+		}
 	}
 
 	// --- network ---
@@ -1254,9 +1273,7 @@ public final class TickEngineCommand {
 				TickEngine.LOGGER.error("Could not write the network HTML report", error);
 				source.sendFailure(Component.literal("Could not write the HTML report, see the server log."));
 			} else {
-				String path = server.getServerDirectory().toAbsolutePath().relativize(file.toAbsolutePath()).toString();
-				source.sendSuccess(() -> Component.literal("HTML report saved: ").withStyle(ChatFormatting.GREEN)
-					.append(Component.literal(path).withStyle(ChatFormatting.WHITE)), false);
+				sendReportSaved(server, source, file);
 			}
 		}));
 	}
@@ -1403,6 +1420,7 @@ public final class TickEngineCommand {
 			return 0;
 		}
 		TickEngineConfig.changed();
+		ReportWebServer.refresh(source.getServer());
 		source.sendSuccess(() -> Component.literal("Set ").withStyle(ChatFormatting.GREEN)
 			.append(Component.literal(option.key).withStyle(ChatFormatting.WHITE))
 			.append(Component.literal(" to ").withStyle(ChatFormatting.GREEN))
@@ -1415,6 +1433,7 @@ public final class TickEngineCommand {
 		boolean spreadBefore = TickEngineConfig.spreadEntityTicks;
 		boolean loaded = TickEngineConfig.load();
 		ServerCoreCompat.refresh();
+		ReportWebServer.refresh(context.getSource().getServer());
 		if (!loaded) {
 			context.getSource().sendFailure(Component.literal("The config file has a syntax error and was not loaded;"
 				+ " the previous settings stay in use. See the server log for the position."));

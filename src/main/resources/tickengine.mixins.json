@@ -22,7 +22,9 @@
 		"PacketEncoderMixin",
 		"PlacedFeatureMixin",
 		"PlayerStackMixin",
+		"ServerCommonPacketListenerAccessor",
 		"ServerEntityMixin",
+		"ServerHandshakeMixin",
 		"ServerLevelMixin",
 		"StructureStartMixin",
 		"TrackedEntityMixin"
