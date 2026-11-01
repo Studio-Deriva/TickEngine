@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import net.fabricmc.fabric.api.tag.convention.v2.ConventionalEntityTypeTags;
 import net.fabricmc.loader.api.FabricLoader;
@@ -466,6 +467,11 @@ public final class DiagnosticReport {
 				+ format(snapshot.msPerTick(entry.totalNanos())) + " ms/tick, "
 				+ format(entry.calls() / (double) snapshot.sampledTicks) + " calls/tick"));
 		}
+		// Ranks and types only: chunk coordinates would say where the bases are.
+		lines.add("- Heaviest chunks (" + snapshot.chunkTimes.size() + " with ticking content):");
+		snapshot.chunkTimes.stream().limit(TOP_ROWS).forEach(chunk -> lines.add("  - "
+			+ format(snapshot.msPerTick(chunk.totalNanos())) + " ms/tick, mostly "
+			+ chunk.topTypes().stream().map(ProfileSnapshot.TypeShare::id).collect(Collectors.joining(", "))));
 		ChunkActivity chunks = snapshot.chunks;
 		lines.add("- Chunks: " + chunks.loaded() + " loaded from disk, " + chunks.created() + " started generating, " + chunks.generated()
 			+ " finished generating in " + snapshot.durationMillis / 1000 + " s; worldgen threads "

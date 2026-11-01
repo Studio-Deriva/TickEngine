@@ -97,6 +97,15 @@ public final class MinecraftCompat {
 		*///?}
 	}
 
+	/** Lowest Y a block can be placed at. */
+	public static int minY(LevelHeightAccessor level) {
+		//? if >=1.21.2 {
+		return level.getMinY();
+		//?} else {
+		/*return level.getMinBuildHeight();
+		*///?}
+	}
+
 	/** Highest Y a block can be placed at (inclusive). */
 	public static int maxY(LevelHeightAccessor level) {
 		//? if >=1.21.2 {

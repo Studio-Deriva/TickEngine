@@ -3,6 +3,9 @@ package com.studioderiva.tickengine;
 import com.studioderiva.tickengine.command.TickEngineCommand;
 import com.studioderiva.tickengine.compat.ServerCoreCompat;
 import com.studioderiva.tickengine.config.TickEngineConfig;
+import com.studioderiva.tickengine.history.HistoryRecorder;
+import com.studioderiva.tickengine.history.HistoryStore;
+import com.studioderiva.tickengine.limit.EntityLimit;
 import com.studioderiva.tickengine.network.NetworkProfiler;
 import com.studioderiva.tickengine.notice.AdminNotices;
 import com.studioderiva.tickengine.profiler.TickProfiler;
@@ -30,6 +33,7 @@ public final class TickEngine implements DedicatedServerModInitializer {
 
 		ServerTickEvents.START_SERVER_TICK.register(server -> {
 			TickProfiler.onTickStart(server);
+			HistoryRecorder.onTickStart();
 			AutoTuner.onTickStart();
 			EmergencyMode.onTickStart();
 		});
@@ -44,10 +48,13 @@ public final class TickEngine implements DedicatedServerModInitializer {
 			AutoTuner.onTickEnd(server);
 			EntityStacker.onTickEnd(server);
 			AdminNotices.tick(server);
+			// Last, so the period sees this tick's auto-tuning level and emergency state.
+			HistoryRecorder.onTickEnd(server);
 		});
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			ServerCoreCompat.refresh();
 			ReportWebServer.refresh(server);
+			HistoryStore.configure(server.getServerDirectory());
 		});
 		// Before worlds save, so the original distances are back in place.
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -60,6 +67,8 @@ public final class TickEngine implements DedicatedServerModInitializer {
 			BlockEntityThrottle.reset();
 			EntityThrottle.reset();
 			EntityStacker.reset();
+			EntityLimit.reset();
+			HistoryRecorder.reset();
 			AdminNotices.reset();
 			ReportWebServer.stop();
 		});

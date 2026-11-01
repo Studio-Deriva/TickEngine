@@ -3,6 +3,8 @@
 	"package": "com.studioderiva.tickengine.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"server": [
+		"AnimalBreedingMixin",
+		"BaseSpawnerMixin",
 		"BoundTickingBlockEntityMixin",
 		"ChunkDataReadMixin",
 		"ChunkMapMixin",
@@ -27,7 +29,10 @@
 		"ServerHandshakeMixin",
 		"ServerLevelMixin",
 		"StructureStartMixin",
-		"TrackedEntityMixin"
+		"ThrownEggMixin",
+		"TrackedEntityMixin",
+		"TrialSpawnerMixin",
+		"VillagerMakeLoveMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

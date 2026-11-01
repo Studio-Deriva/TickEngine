@@ -67,6 +67,31 @@ public final class ThrottleRules<V> {
 		}
 	};
 
+	public static final int MAX_LIMIT = 1000;
+
+	/** Most entities of one type in one chunk, for the entity limit. */
+	public static final ValueType<Integer> LIMIT = new ValueType<>() {
+		@Override
+		public Integer fromJson(JsonElement json) {
+			return json.getAsInt();
+		}
+
+		@Override
+		public String toJson(Integer value) {
+			return value.toString();
+		}
+
+		@Override
+		public String validate(Integer value) {
+			return value >= 1 && value <= MAX_LIMIT ? null : "limit must be between 1 and " + MAX_LIMIT + ".";
+		}
+
+		@Override
+		public String describe(Integer value) {
+			return "at most " + value + " per chunk";
+		}
+	};
+
 	/** AI and full-tick intervals of an entity rule. */
 	public record EntityIntervals(int ai, int tick) {
 	}

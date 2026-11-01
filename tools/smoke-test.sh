@@ -26,6 +26,19 @@ fi
 
 mkdir -p "$out"
 log="$out/server.log"
+
+# 1.21.2+ pauses an empty server after pause-when-empty-seconds (60 by default), and the checks take
+# longer than that with no player online. Turn pausing off for the test and put the file back after.
+properties="$run/server.properties"
+if [ -f "$properties" ] && grep -q '^pause-when-empty-seconds=' "$properties"; then
+	cp "$properties" "$out/server.properties.saved"
+	sed -i.tmp 's/^pause-when-empty-seconds=.*/pause-when-empty-seconds=0/' "$properties" && rm -f "$properties.tmp"
+fi
+restore_properties() {
+	if [ -f "$out/server.properties.saved" ]; then
+		mv "$out/server.properties.saved" "$properties"
+	fi
+}
 stdin="$out/stdin"
 [ -p "$stdin" ] || mkfifo "$stdin"
 
@@ -38,6 +51,7 @@ stop_server() {
 	echo stop >&3 2>/dev/null || true
 	exec 3>&- || true
 	wait "$server" 2>/dev/null || true
+	restore_properties
 }
 trap stop_server EXIT
 
@@ -63,6 +77,8 @@ if ! wait_for 'Done \(' 900; then
 	exit 1
 fi
 
+# Every history period is a peak while the threshold is 1 ms, so peaks get written.
+send 'tickengine config set history.peakAverageMspt 1' 0
 # Something to throttle: a force-loaded chunk with mobs, an item and a furnace.
 send 'forceload add 0 0'
 send 'summon minecraft:zombie 8 80 8' 0
@@ -75,6 +91,8 @@ send 'tickengine status' 2
 send 'tickengine profile start 5' 8
 send 'tickengine top blockentities' 1
 send 'tickengine top entities' 1
+send 'tickengine top chunks' 1
+send 'tickengine top worldgen' 1
 send 'tickengine config reload' 1
 send 'tickengine tuning status' 1
 send 'tickengine rules entities set-in minecraft:the_nether 2 2 minecraft:zombie' 1
@@ -101,6 +119,43 @@ send 'damage @e[type=minecraft:cow,tag=tickengine.stack.3,limit=1] 100 minecraft
 send 'data get entity @e[type=minecraft:cow,tag=tickengine.stack.2,limit=1] CustomName' 1
 send 'kill @e[type=minecraft:cow]' 1
 send 'tickengine stacking mode off' 1
+# Entity limit: with a limit of 2 cows and 1 chicken per chunk, two cows in love make no calf and
+# thrown eggs hatch no chicks. Spawners are placed so their classes (and mixins) load; without a
+# player nearby they never spawn.
+send 'setblock 1 79 1 minecraft:spawner' 0
+send 'setblock 2 79 2 minecraft:trial_spawner' 0
+send 'fill 0 300 0 7 300 7 minecraft:stone' 0
+send 'fill 0 301 0 7 303 7 minecraft:air' 0
+send 'tickengine limit rules set 2 minecraft:cow' 0
+send 'tickengine limit rules set 1 minecraft:chicken' 0
+send 'tickengine limit enable' 0
+send 'summon minecraft:cow 3 301 3 {InLove:600}' 0
+send 'summon minecraft:cow 3 301 3 {InLove:600}' 10
+send 'tickengine limit' 1
+send 'summon minecraft:chicken 5 301 5' 0
+for _ in $(seq 1 40); do
+	echo 'summon minecraft:egg 4 305 4' >&3
+done
+sleep 4
+send 'tickengine limit' 1
+send 'execute if entity @e[type=minecraft:cow,x=0,y=290,z=0,dx=16,dy=20,dz=16]' 0
+send 'kill @e[type=minecraft:cow]' 0
+send 'kill @e[type=minecraft:chicken]' 0
+send 'tickengine limit disable' 0
+send 'tickengine limit rules remove minecraft:cow' 0
+send 'tickengine limit rules remove minecraft:chicken' 1
+# History: a peak starts a detailed session when history.profilePeaks is on; stopping it saves it.
+# Auto-tuning above level 5 is a peak, and the dev server is too light to reach the MSPT thresholds.
+sleep 10
+send 'tickengine tuning level 6' 0
+send 'tickengine config set history.profilePeaks true' 3
+send 'tickengine profile stop' 2
+send 'tickengine tuning level 0' 0
+send 'tickengine tuning resume' 0
+send 'tickengine config set history.profilePeaks false' 0
+send 'tickengine config set history.peakAverageMspt 50' 0
+send 'tickengine history 1' 2
+send 'tickengine history report 1' 2
 # Network profiler: server list pings are real connections, so packets get encoded and measured.
 send 'tickengine network start 5' 1
 # Asked while the session runs: it must say so instead of showing an old result as if it were new.
@@ -144,6 +199,16 @@ check "entity throttling gives minimal ticks (ServerLevel mixin, accessors)" 'la
 check "detailed profiling times entities (WrapOperation on Entity.tick)" 'minecraft:(villager|zombie) x'
 check "detailed profiling times block entities (WrapOperation on the ticker)" 'minecraft:furnace x'
 check "HTML report is written (Util.ioPool)" 'HTML report saved'
+check "chunks ranked by tick time" '1\. minecraft:overworld -?[0-9]+ -?[0-9]+ minecraft:[a-z_]+  [0-9.]+ ms/tick'
+check "chunk loading and worldgen view" 'Chunk loading and worldgen'
+check "entity limit stops breeding (Animal mixin)" 'Stopped breeding: [0-9]+ times, last minecraft:cow'
+check "entity limit stops chicks from eggs (ThrownEgg mixin)" 'Stopped breeding: [0-9]+ times, last minecraft:chicken'
+check "no calf was born" 'Test passed[.,] [Cc]ount: 2'
+check "history records periods" 'Recorded: [1-9][0-9]* periods'
+check "history keeps peaks" 'Peaks: [1-9]'
+check "a peak starts a detailed session (history.profilePeaks)" 'History: peak \(.*auto-tuning\), detailed profiler started'
+check "the detailed session is kept" 'Detailed sessions during peaks: [1-9]'
+check "history HTML report is written" 'HTML report saved: .*tickengine-history-'
 check "config file reloads (Gson lenient parsing of JSON5)" 'TickEngine config reloaded'
 check "auto-tuning status" 'Force-loaded chunks: never slower than'
 check "default entity rules (Identifier/ResourceLocation)" 'minecraft:warden: AI never throttled'

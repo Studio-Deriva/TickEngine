@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.0.0-beta.10-pre-release
+
+- **Profiler: heaviest chunks.** Block entities, entities and blocks also count for the chunk they tick
+  in, so `/tickengine top chunks` ranks chunks by tick time (block entities, entities and blocks apart,
+  the three types that took most of it, click to teleport to the slowest call there). Also in the HTML
+  report and, without coordinates, in `/tickengine report`.
+- **Changed: `/tickengine top chunks` is now the chunk ranking.** Chunk loading, generation and worldgen
+  moved to `/tickengine top worldgen`, matching `/tickengine network top chunks`.
+- **Entity limit per chunk** (`/tickengine limit`, off by default). Once a chunk holds `entityLimit.perChunk`
+  (48) mobs of one type, natural spawning, spawners, trial spawners and breeding (animals, villagers,
+  chicks from thrown eggs) add no more of that type there. Each source can be turned off; rules per type,
+  mod and dimension; an exclude list. Nothing is removed, a stack counts as one mob, spawn eggs and
+  commands are never stopped.
+- **History of the last 7 days** (`history.*`, on by default). Once a minute (one light profiler window)
+  the average and longest tick, TPS, players, entities, chunks, auto-tuning level and emergency state go to
+  `tickengine/history/<date>.jsonl`; files older than `history.keepDays` are deleted. Peaks (average from
+  50 ms, a tick from 500 ms, or auto-tuning above level 5) also keep the heaviest mods, types and chunks.
+  `/tickengine history [hours]` in chat (click a peak for its details), `/tickengine history report` as
+  an HTML chart. `history.profilePeaks` (off by default) starts a 60 s detailed session during a peak, at
+  most once every 10 minutes.
+- **Fix: answers lost over RCON.** `/tickengine history`, `history report`, `history peak`, `profile report`, `network report` and `report` read or write files off the
+  server thread and answered a moment later, which RCON drops: it sends a command's output when the
+  command returns. Commands from the console or RCON now wait for the disk (at most 10 s) before
+  returning; players still get the answer without any wait.
+- `tools/smoke-test.sh` turns off `pause-when-empty-seconds` while it runs (and restores the file): the
+  checks now last longer than the 60 s after which an empty 1.21.2+ server stops ticking.
+- Tested with `tools/smoke-test.sh` on the dev servers of 1.21.1, 1.21.9 and 1.21.11 (chunk ranking,
+  entity limit on breeding and eggs, history with a peak and a detailed session); unit tests on every
+  version. In game on 1.21.11 with a player: the limit on spawners, trial spawners and natural spawning,
+  the chunk ranking and the history with real lag. Villager breeding is not verified in game yet.
+
 ## 1.0.0-beta.9
 
 - **HTML reports open in the browser with a click.** The "HTML report saved" line in chat now has an

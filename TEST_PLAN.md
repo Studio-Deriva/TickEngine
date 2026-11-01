@@ -43,6 +43,13 @@ Se un controllo fallisce, guarda prima il log: cerca `Mixin`, `TickEngine`, `Exc
 Dalla beta.6 lo script prova anche la modalità emergenza avviata a mano (l'auto-tuning sale al massimo e
 torna a 0) e lo stacking (tre mucche diventano "Cow x3", `/damage` ne toglie una, `/kill` toglie il resto).
 
+Dopo la beta.9 prova anche la classifica dei chunk (`top chunks`, `top worldgen`) e il limite di entità:
+due mucche in amore col limite a 2 non fanno vitelli, 40 uova lanciate col limite di 1 gallina non fanno
+pulcini; spawner e trial spawner vengono piazzati solo perché le loro classi (e i mixin) si carichino.
+Prova anche lo storico: soglia dei picchi a 1 ms così ogni periodo è un picco, `history 1`,
+`history report 1`, e con `tuning level 6` e `history.profilePeaks` una sessione dettagliata automatica.
+Disattiva `pause-when-empty-seconds` mentre gira e rimette il file com'era alla fine.
+
 Lo script **non** copre: l'AI saltata (serve un giocatore vicino), i click in chat, i permessi da
 giocatore. Sono la parte 3.
 
@@ -152,6 +159,31 @@ di test; mancano i messaggi in chat agli admin visti da un client. `/tickengine 
 (spawn naturale in pausa; dalla console non si poteva provare). La view distance scende al minimo e
 torna com'era con `/tickengine emergency stop`. Gli admin collegati ricevono il messaggio rosso all'avvio
 e quello verde alla fine.
+
+**j. Classifica dei chunk.** `/tickengine profile start 10` vicino a una farm o a una stanza di hopper, poi
+`/tickengine top chunks`: la farm è in cima; il tooltip mostra il chunk, block entity / entità / blocchi
+separati e i tipi principali; il click porta sopra la macchina o accanto al mob più lento, non dentro un
+blocco. `/tickengine top worldgen` mostra caricamento e generazione come prima. Nel report HTML la tabella
+"Chunks by tick time".
+
+**k. Limite di entità con un giocatore.** Le parti che dalla console non si possono provare (spawner e
+spawn naturale funzionano solo con un giocatore vicino). `/tickengine limit enable`, poi:
+- `/tickengine limit rules set 4 minecraft:zombie`, uno spawner di zombie in una stanza chiusa, stai
+  accanto: si fermano a 4 nel chunk dello spawner (lo spawner vanilla da solo ne mette fino a 6 nel
+  suo raggio). `/tickengine limit` mostra "Stopped spawners" e il click porta lì.
+- Di notte in un'area piatta con `/tickengine limit rules set 2 minecraft:zombie`: nessun chunk vicino
+  supera 2 zombie per spawn naturale (contare con `execute if entity @e[type=zombie,x=..,dx=15,...]`).
+- Trial spawner (`/setblock ~ ~ ~ trial_spawner`, poi giocatore vicino) con limite 1 per il suo mob.
+- Villager: due villager con letti liberi e cibo, limite `minecraft:villager 2`: nessun figlio, i letti
+  restano liberi, e i due non mangiano di nuovo per circa 5 minuti.
+- Con `entityLimit.spawners false` lo spawner torna a spawnare: le fonti si spengono una per una.
+- Uova spawn e `/summon` funzionano anche oltre il limite.
+
+**l. Storico.** Su un server tenuto acceso qualche ora: `/tickengine history 3` mostra i periodi; con un
+lag vero (molti mob, `/tick sprint` o una farm pesante) compare un picco, e cliccandolo si vedono mod,
+tipi e chunk con il teletrasporto. `/tickengine history report 24` apre il grafico nel browser. Dopo
+`history.keepDays` giorni i file vecchi in `tickengine/history` spariscono da soli (si può provare
+rinominando un file con una data vecchia e riavviando).
 
 ## 4. Jar sbagliato
 
@@ -286,3 +318,19 @@ Hover e click: stesso codice di 1.21.11 (>=1.21.5), già provato lì.
   `minecraft:brand`, `villager-news-addon-port:settings`, `fabric:custom_ingredient_sync`. Chunk dell'ingresso 78%.
 - Da sistemare forse: il namespace `c` (convenzioni comuni di Fabric) compare come mod "c".
 - Non provato: una mod che sostituisce la compressione (nessuna nel modpack). 0 errori nel log.
+
+### Esiti in gioco, chunk / limite / storico (2026-11-01, 1.21.11, client dev "TickTester" connesso, console pilotata da Claude)
+
+| Test | Esito |
+|------|-------|
+| k. Spawner di zombie (stanza buia, giocatore in creativa a 12 blocchi), limite 4 | OK: 4 zombie nel chunk, "Stopped spawners: 29 times"; con `entityLimit.spawners false` arriva a 30 |
+| k. Trial spawner di husk (giocatore in sopravvivenza in gabbia di vetro), limite 3 | OK: 3 husk; con `entityLimit.trialSpawners false` arriva a 20. Nota: rifiutato, il trial spawner riprova quasi a ogni tick (~10 tentativi al secondo, vanilla non aspetta se lo spawn fallisce) |
+| k. Spawn naturale di notte, limite 2 zombie | OK: 17x17 chunk contati, 12 con zombie, nessuno oltre 2; "Stopped natural spawning" sale |
+| k. Villager con pane e letti, limite 2 | Non concluso: i villager mangiano il pane (tentano) ma vanilla non trova un letto libero raggiungibile, quindi `breed` (dove sta il limite) non viene mai chiamato. Provato in recinto di vetro e in recinto aperto. Da rifare in un villaggio vero |
+| j. Classifica chunk con 3500 maiali in un box | OK: il chunk del box primo con 96.6% del tick |
+| l. Storico con lag vero (MSPT 120 ms) | OK: picco "average" con maiali e chunk giusti, sessione automatica (`history.profilePeaks`) salvata e mostrata sotto il picco, report HTML col grafico servito dal web server |
+| Click in chat (teletrasporto, peak) | Non provati: senza controllo del client non si clicca. I comandi dietro i click provati da console |
+
+Trovato e corretto: `/tickengine history peak` non mostrava la sessione dettagliata finita prima della fine
+del minuto; nel report HTML il dettaglio aperto in una colonna stretta rendeva la riga altissima (ora ha
+una riga sua).
