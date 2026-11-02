@@ -3,6 +3,7 @@ package com.studioderiva.tickengine.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -52,5 +53,29 @@ class TickEngineConfigTest {
 		} finally {
 			exit.set(previous);
 		}
+	}
+
+	@Test
+	void everyInconsistencyIsListedApart() {
+		TickEngineConfig.Option<?> memory = TickEngineConfig.options().get("emergency.memoryPercent");
+		TickEngineConfig.Option<?> lower = TickEngineConfig.options().get("autoTuning.lowerBelowMspt");
+		String previousMemory = memory.format();
+		String previousLower = lower.format();
+		try {
+			assertNull(memory.set("30"));
+			assertNull(lower.set("199"));
+			assertEquals(2, TickEngineConfig.inconsistencies().size(), "two problems, so fixing one leaves the other");
+			assertNull(memory.set("60"));
+			assertEquals(1, TickEngineConfig.inconsistencies().size());
+			assertTrue(TickEngineConfig.inconsistencies().get(0).startsWith("autoTuning.lowerBelowMspt"));
+		} finally {
+			memory.set(previousMemory);
+			lower.set(previousLower);
+		}
+	}
+
+	@Test
+	void theReportWebServerIsOffByDefault() {
+		assertEquals("false", TickEngineConfig.options().get("output.webServer").defaultText());
 	}
 }

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.0
+
+First stable release: the fixes from a full audit of the mod.
+
+
+- **Fix: stacking and farms that kill by falling or leave mobs at half a heart.** The mob that takes a
+  dead one's place got full health and lost its fall, so in a fall-damage farm the rest of a stack
+  landed alive, and in a one-hit farm it needed a full fight. Now what hit every mob of the stack (a
+  fall, lava, cramming, an explosion) stays on the rest, and only an attack is charged to the mob that
+  died.
+- **Fix: stacking merged horses, donkeys and llamas with different stats** (speed, jump, health), and
+  the copies took the stats of one of them. Attribute base values must now match (a zombie's random
+  reinforcement chance is left out, so zombies still stack).
+- **Fix: stacking ignored scoreboard tags and `Invulnerable`.** Mobs tagged by a datapack or a command,
+  or made invulnerable, now only stack with mobs that have the same.
+- **Fix: chickens never stacked**, since each one has its own random egg timer, which was compared. Now
+  they stack, and a stack lays as many eggs as its chickens would.
+- **Fix: a dispenser with shears sheared a whole stack for the wool of one mob.** It now shears one,
+  like a player.
+- **Fix: the entity limit did not stop frogs, sniffers, turtles and foxes from breeding.** Frogs,
+  sniffers and turtles no longer make eggs, and foxes no cubs, in a chunk at the limit.
+- **Fix: one inconsistent value in the config file blocked every `/tickengine config set`**, and with
+  two of them neither could be fixed from the game. Now only a change that brings a new inconsistency is
+  refused; the ones left are shown after each change.
+- **Fix: `/tickengine report` showed `output.webPublicAddress` and `output.webBindAddress`**, despite
+  saying it holds no addresses. Once set, they show as "(set, hidden)".
+- **Changed: the report web server (`output.webServer`) is off by default**, since it opens a port. Config
+  files that already exist keep their value.
+- Dying mobs are no longer throttled, so they no longer lie there longer than 20 ticks far from players.
+- Tested with `tools/smoke-test.sh` on every version (1.21.1, 1.21.2, 1.21.5, 1.21.6, 1.21.9, 1.21.11),
+  unit tests on every version, and each fix in game from the dev server console on every version. Player
+  actions on stacks (sword and axe kills, shears, a name tag, feeding) tested on 1.21.11 with a fake
+  player.
+
 ## 1.0.0-beta.10-pre-release
 
 - **Profiler: heaviest chunks.** Block entities, entities and blocks also count for the chunk they tick

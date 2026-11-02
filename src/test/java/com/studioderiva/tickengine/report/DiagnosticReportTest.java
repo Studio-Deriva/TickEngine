@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.studioderiva.tickengine.config.TickEngineConfig;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -26,6 +27,20 @@ class DiagnosticReportTest {
 	private static String body(String url) {
 		String query = url.substring(url.indexOf("&body=") + "&body=".length());
 		return URLDecoder.decode(query, StandardCharsets.UTF_8);
+	}
+
+	@Test
+	void addressesAreHiddenOnceSet() {
+		TickEngineConfig.Option<?> address = TickEngineConfig.options().get("output.webPublicAddress");
+		String previous = address.format();
+		try {
+			assertEquals("auto", DiagnosticReport.shown(address), "the default says nothing about the server");
+			address.set("play.example.com");
+			assertEquals("(set, hidden)", DiagnosticReport.shown(address));
+			assertEquals("4", DiagnosticReport.shown(TickEngineConfig.options().get("blockEntities.defaultInterval")));
+		} finally {
+			address.set(previous);
+		}
 	}
 
 	@Test

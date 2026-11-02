@@ -660,14 +660,16 @@ public final class TickEngineCommand {
 	private static void stackingExplanation(CommandSourceStack source) {
 		source.sendSuccess(() -> line("What it does", "mobs of the same kind with the same data (colour, sheared or not, "
 			+ "equipment...) standing close together become one mob that counts for several, shown as \"Zombie x7\". "
-			+ "Killing it kills one mob at a time with its normal loot and XP; using it (feeding, shearing, a name tag, a lead) "
-			+ "separates the mob you clicked. Natural spawning counts every mob in a stack. Never stacked: named, tamed or "
+			+ "Killing it kills one mob at a time with its normal loot and XP, and what hit all of them (a fall, lava) stays on "
+			+ "the rest; using it (feeding, shearing, a name tag, a lead) separates the mob you clicked. Natural spawning "
+			+ "counts every mob in a stack, and chicken stacks lay eggs for every chicken. Never stacked: named, tamed or "
 			+ "leashed mobs, babies, animals in love, mobs in combat, riders and their mounts, bosses, and the excluded types.",
 			ChatFormatting.WHITE), false);
 		source.sendSuccess(() -> line("Gain", "one mob ticks instead of up to " + TickEngineConfig.stackMaxSize
 			+ ": in farms and crowded places, most of the entity cost goes away.", ChatFormatting.GREEN), false);
 		source.sendSuccess(() -> line("Risk", "a stack moves, thinks and despawns as one mob, so ten zombies become one "
-			+ "zombie with ten lives; mobs that produce something over time (wool regrowth, for example) produce for one. "
+			+ "zombie with ten lives; mobs that produce something over time (wool regrowth, honey, armadillo scutes) produce "
+			+ "for one. "
 			+ "Mods that keep their own data about single mobs may not expect the copies made when a stack is killed or used. "
 			+ "If TickEngine is removed, each stack stays one single mob: run '/tickengine stacking unstack' first.",
 			ChatFormatting.YELLOW), false);
@@ -1799,6 +1801,7 @@ public final class TickEngineCommand {
 			return 0;
 		}
 		String previous = option.format();
+		List<String> problemsBefore = TickEngineConfig.inconsistencies();
 		String error = option.set(StringArgumentType.getString(context, "value"));
 		if (error != null) {
 			source.sendFailure(Component.literal(option.key + ": " + error));
@@ -1811,10 +1814,13 @@ public final class TickEngineCommand {
 				+ option.confirmCommand() + "', which explains them and asks for confirmation."));
 			return 0;
 		}
-		String inconsistency = TickEngineConfig.checkConsistency();
-		if (inconsistency != null) {
+		// Only a problem this change brings is refused: one already in the file must not block every other
+		// setting, nor the setting that fixes it while a second one remains.
+		List<String> problemsAfter = TickEngineConfig.inconsistencies();
+		String introduced = problemsAfter.stream().filter(problem -> !problemsBefore.contains(problem)).findFirst().orElse(null);
+		if (introduced != null) {
 			option.set(previous);
-			source.sendFailure(Component.literal(inconsistency));
+			source.sendFailure(Component.literal(introduced));
 			return 0;
 		}
 		TickEngineConfig.changed();
@@ -1824,6 +1830,7 @@ public final class TickEngineCommand {
 			.append(Component.literal(" to ").withStyle(ChatFormatting.GREEN))
 			.append(Component.literal(option.format()).withStyle(ChatFormatting.WHITE))
 			.append(Component.literal(" and saved to the config file.").withStyle(ChatFormatting.GREEN)), true);
+		problemsAfter.forEach(problem -> source.sendSuccess(() -> Component.literal(problem).withStyle(ChatFormatting.YELLOW), false));
 		return 1;
 	}
 

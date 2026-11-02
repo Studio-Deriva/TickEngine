@@ -12,6 +12,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 
@@ -80,6 +81,35 @@ public final class EntityLimit {
 		return true;
 	}
 
+	/** True while a breeding goal that already asked the limit makes the baby, so it is not asked twice. */
+	private static boolean breedingChecked;
+
+	/**
+	 * Breeding of two animals, checked for the parent's type. When refused, both lose their love mode,
+	 * so they can be fed again later. Counted right away when allowed, like {@link #allows}.
+	 */
+	public static boolean allowsBreeding(Animal parent, Animal partner) {
+		if (!(parent.level() instanceof ServerLevel level)
+			|| allows(level, parent.getType(), parent.blockPosition(), Source.BREEDING)) {
+			return true;
+		}
+		parent.resetLove();
+		if (partner != null) {
+			partner.resetLove();
+		}
+		return false;
+	}
+
+	/** Set by the breeding goals around making the baby; see {@link #breedingChecked()}. */
+	public static void setBreedingChecked(boolean checked) {
+		breedingChecked = checked;
+	}
+
+	/** Whether the breeding happening now was already checked by its goal. */
+	public static boolean breedingChecked() {
+		return breedingChecked;
+	}
+
 	/** Whether the config lets the limit stop this source. */
 	public static boolean limits(Source source) {
 		return switch (source) {
@@ -126,5 +156,6 @@ public final class EntityLimit {
 		BLOCKED.clear();
 		LAST_BLOCKED.clear();
 		countsTick = Integer.MIN_VALUE;
+		breedingChecked = false;
 	}
 }

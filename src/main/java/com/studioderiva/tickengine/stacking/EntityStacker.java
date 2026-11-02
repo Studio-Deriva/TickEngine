@@ -16,10 +16,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.regex.Pattern;
 import net.fabricmc.fabric.api.tag.convention.v2.ConventionalEntityTypeTags;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
@@ -27,6 +30,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -34,6 +38,9 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.AttributeMap;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.npc.InventoryCarrier;
 import net.minecraft.world.item.ItemStack;
@@ -46,14 +53,18 @@ import net.minecraft.world.item.ItemStack;
  * with the entity in every version, and shown as the custom name ("Zombie x7"). Two mobs stack
  * only when their saved data is the same apart from what differs between any two mobs anyway
  * (position, health, timers, see {@link #VOLATILE_KEYS}): a red and a white sheep, a sheared and
- * a woolly one, or two horses with different stats never stack, and modded data is compared too.
+ * a woolly one, two horses with different stats or two mobs with different scoreboard tags never
+ * stack, and modded data is compared too.
  *
  * <p>A stack behaves like separate mobs where it matters:
  * <ul>
  *   <li>Dying kills one mob: it drops its own loot and XP, and a copy with one less in the count
- *   takes its place ({@link #afterDeath}). {@code /kill} removes the whole stack.</li>
+ *   takes its place ({@link #afterDeath}), with the health the rest of the stack has: damage that
+ *   hit all of them (a fall, lava) counts, an attack on the stack hit only the one that died.
+ *   {@code /kill} removes the whole stack.</li>
  *   <li>A player interaction that does something (feeding, shearing, a name tag, a lead) applies
- *   to one mob: the rest moves to a copy first ({@link #afterInteract}).</li>
+ *   to one mob: the rest moves to a copy first ({@link #afterInteract}). So does a dispenser shearing
+ *   a stack, and a stack of chickens lays eggs as often as its chickens would.</li>
  *   <li>Natural spawning counts a stack as all its mobs ({@link #expandStacks}), so the mob cap and
  *   mob farms work as without stacking.</li>
  *   <li>What a stack picks up (an item, a block for an enderman) belongs to one mob: the copies made
@@ -67,10 +78,12 @@ public final class EntityStacker {
 	/** Saved data that differs between any two otherwise identical mobs, ignored when comparing. */
 	static final Set<String> VOLATILE_KEYS = Set.of(
 		"Pos", "Motion", "Rotation", "UUID", "Health", "AbsorptionAmount", "FallDistance", "fall_distance", "Fire", "Air",
-		"OnGround", "PortalCooldown", "HurtTime", "HurtByTimestamp", "DeathTime", "FallFlying", "Invulnerable",
-		"CustomName", "CustomNameVisible", "Tags", "Brain", "attributes", "Attributes", "LeftHanded", "CanPickUpLoot",
+		"OnGround", "PortalCooldown", "HurtTime", "HurtByTimestamp", "DeathTime", "FallFlying",
+		"CustomName", "CustomNameVisible", "Brain", "attributes", "Attributes", "LeftHanded", "CanPickUpLoot",
 		"Age", "InLove", "LoveCause", "love_cause", "active_effects", "ActiveEffects", "sleeping_pos", "SleepingX",
-		"SleepingY", "SleepingZ", "id");
+		"SleepingY", "SleepingZ", "id",
+		// Random for every chicken, so no two would ever stack; a stack lays for all its chickens anyway.
+		"EggLayTime");
 	/**
 	 * Data that keeps a mob out of stacking: it belongs to someone, is tied to something, or is a
 	 * block an enderman picked up (see {@link #holdsAcquiredItems} for items).
@@ -91,6 +104,13 @@ public final class EntityStacker {
 
 	/** Stacks about to die or be used, with their data from before (a map in case one dies inside another's death). */
 	private static final Map<Mob, Pending> pending = new IdentityHashMap<>();
+	/**
+	 * Per stack, the damage that hit only its front mob (attacks), which the rest of the stack did not
+	 * take. Weak keys: an unloaded stack forgets it, and its copies then start at full health.
+	 */
+	private static final Map<Mob, Float> frontDamage = new WeakHashMap<>();
+	/** Per stack, its health when the hit it is taking now started, and the tick of that hit. */
+	private static final Map<Mob, HitStart> hitStart = new WeakHashMap<>();
 	private static boolean loadErrorLogged;
 
 	private static long mergesTotal;
@@ -133,6 +153,10 @@ public final class EntityStacker {
 
 	/** Sets the count, its tag and its name. A count of 1 makes it a normal mob again. */
 	public static void setCount(Mob mob, int count) {
+		if (count <= 1) {
+			frontDamage.remove(mob);
+			hitStart.remove(mob);
+		}
 		for (String tag : new ArrayList<>(mob.getTags())) {
 			if (tag.startsWith(TAG_PREFIX)) {
 				mob.removeTag(tag);
@@ -331,7 +355,37 @@ public final class EntityStacker {
 
 	/** The saved data that must match for two mobs to stack; empty when the mob must never stack. */
 	private static CompoundTag signature(Mob mob) {
-		return signature(MinecraftCompat.saveEntity(mob));
+		CompoundTag signature = signature(MinecraftCompat.saveEntity(mob));
+		if (!signature.isEmpty()) {
+			CompoundTag bases = attributeBases(mob);
+			if (!bases.isEmpty()) {
+				signature.put("tickengine:attribute_bases", bases);
+			}
+		}
+		return signature;
+	}
+
+	/**
+	 * The base value of every attribute the mob has, read from the mob so that two mobs of a type
+	 * always list the same ones (saved data holds only those used so far). Horse speed, jump and
+	 * health are base values; the modifiers mobs get at random when they spawn (follow range) are not
+	 * compared. Zombies also get a random base for their reinforcement chance, which is left out:
+	 * comparing it would keep every two zombies apart.
+	 */
+	private static CompoundTag attributeBases(Mob mob) {
+		CompoundTag bases = new CompoundTag();
+		AttributeMap attributes = mob.getAttributes();
+		for (Attribute attribute : BuiltInRegistries.ATTRIBUTE) {
+			var holder = BuiltInRegistries.ATTRIBUTE.wrapAsHolder(attribute);
+			if (attribute == Attributes.SPAWN_REINFORCEMENTS_CHANCE.value() || !attributes.hasAttribute(holder)) {
+				continue;
+			}
+			Identifier id = BuiltInRegistries.ATTRIBUTE.getKey(attribute);
+			if (id != null) {
+				bases.putDouble(id.toString(), attributes.getBaseValue(holder));
+			}
+		}
+		return bases;
 	}
 
 	static CompoundTag signature(CompoundTag data) {
@@ -340,14 +394,83 @@ public final class EntityStacker {
 				return new CompoundTag();
 			}
 		}
+		Tag tags = data.get("Tags");
+		data.remove("Tags");
 		for (String key : VOLATILE_KEYS) {
 			data.remove(key);
+		}
+		// Scoreboard tags from commands and datapacks must match; the stack count is not one of them.
+		String otherTags = otherTags(tags);
+		if (!otherTags.isEmpty()) {
+			data.putString("Tags", otherTags);
 		}
 		if (data.isEmpty()) {
 			// Nothing left to compare would make every mob of the type match: keep something.
 			data.putBoolean("tickengine", true);
 		}
 		return data;
+	}
+
+	/** The scoreboard tags in saved data apart from the stack count, sorted, as one text; empty when none. */
+	static String otherTags(Tag tags) {
+		if (!(tags instanceof ListTag list)) {
+			return "";
+		}
+		List<String> names = new ArrayList<>();
+		for (Tag tag : list) {
+			String name = tag.toString();
+			if (!name.contains(TAG_PREFIX)) {
+				names.add(name);
+			}
+		}
+		names.sort(null);
+		return String.join(",", names);
+	}
+
+	// --- damage ---
+
+	private record HitStart(float health, int tick) {
+	}
+
+	/** Before {@code LivingEntity.actuallyHurt}: the health a stack has before this hit. */
+	public static void beforeHurt(LivingEntity entity) {
+		if (entity instanceof Mob mob && mob.level() instanceof ServerLevel && isStack(mob)) {
+			hitStart.put(mob, new HitStart(mob.getHealth(), mob.tickCount));
+		}
+	}
+
+	/**
+	 * After {@code LivingEntity.actuallyHurt}: an attack that the stack survived hit only its front mob,
+	 * so the rest keeps that health. Other damage (a fall, lava, cramming, an explosion) hit all of them.
+	 */
+	public static void afterHurt(LivingEntity entity, DamageSource source) {
+		if (!(entity instanceof Mob mob)) {
+			return;
+		}
+		HitStart start = hitStart.get(mob);
+		if (start == null || start.tick() != mob.tickCount) {
+			return;
+		}
+		float taken = start.health() - mob.getHealth();
+		if (taken > 0 && mob.getHealth() > 0 && hitsOneMob(source)) {
+			frontDamage.merge(mob, taken, Float::sum);
+		}
+	}
+
+	/** Damage from an entity (a player, a mob, an arrow) hits one mob of a stack; explosions hit them all. */
+	static boolean hitsOneMob(DamageSource source) {
+		return (source.getEntity() != null || source.getDirectEntity() != null) && !source.is(DamageTypeTags.IS_EXPLOSION);
+	}
+
+	/**
+	 * Health of the mobs still in the stack, when its front mob has {@code health}: the front mob's
+	 * health plus what only it took. Negative when not known (no hit was seen this tick).
+	 */
+	private static float restHealth(Mob mob, float health) {
+		if (health < 0) {
+			return -1;
+		}
+		return Math.min(mob.getMaxHealth(), health + frontDamage.getOrDefault(mob, 0.0F));
 	}
 
 	// --- dying and using a stack ---
@@ -363,7 +486,9 @@ public final class EntityStacker {
 		// Same guard as die itself: a second call on a dead mob does nothing.
 		if (entity instanceof Mob mob && mob.level() instanceof ServerLevel && !mob.isRemoved()
 			&& !((LivingEntityAccessor) mob).tickengine$isDead() && count(mob) > 1) {
-			remember(mob);
+			// The health before the killing hit; unknown when the mob dies without one (a mod calling die).
+			HitStart start = hitStart.get(mob);
+			remember(mob, restHealth(mob, start != null && start.tick() == mob.tickCount ? start.health() : -1));
 		}
 	}
 
@@ -375,12 +500,19 @@ public final class EntityStacker {
 		}
 		Mob mob = (Mob) entity;
 		CompoundTag data = before.data();
-		data.putFloat("Health", mob.getMaxHealth());
-		for (String key : new String[] {"Motion", "Fire", "HurtTime", "HurtByTimestamp", "DeathTime", "FallDistance",
-			"fall_distance", "active_effects", "ActiveEffects", "AbsorptionAmount"}) {
+		for (String key : new String[] {"Motion", "HurtTime", "HurtByTimestamp", "DeathTime", "active_effects", "ActiveEffects",
+			"AbsorptionAmount"}) {
 			data.remove(key);
 		}
-		spawnRest(mob, data, before.count() - 1);
+		if (before.restHealth() <= 0) {
+			// The hit that killed it was not seen: the rest starts afresh, at full health, not falling or burning.
+			data.remove("Fire");
+			data.remove("FallDistance");
+			data.remove("fall_distance");
+		}
+		// Otherwise the rest keeps its fall and its fire, which it shares with the dead mob: in a farm
+		// that kills by falling, the next mob takes the same fall and dies the same way.
+		spawnRest(mob, data, before.count() - 1, before.restHealth() > 0 ? before.restHealth() : mob.getMaxHealth());
 		// The dead one lies there as a single mob, so its loot and name read right.
 		setCount(mob, 1);
 	}
@@ -388,7 +520,7 @@ public final class EntityStacker {
 	/** Before {@code Player.interactOn}: remembers a stack a player is using. */
 	public static void beforeInteract(Mob mob) {
 		if (mob.level() instanceof ServerLevel && count(mob) > 1) {
-			remember(mob);
+			remember(mob, restHealth(mob, mob.getHealth()));
 		}
 	}
 
@@ -401,7 +533,7 @@ public final class EntityStacker {
 		if (before == null || result == null || !result.consumesAction()) {
 			return;
 		}
-		spawnRest(mob, before.data(), before.count() - 1);
+		spawnRest(mob, before.data(), before.count() - 1, before.restHealth());
 		if (!mob.isRemoved()) {
 			setCount(mob, 1);
 		}
@@ -422,17 +554,24 @@ public final class EntityStacker {
 		}
 	}
 
-	private record Pending(int count, CompoundTag data) {
+	/** {@code restHealth}: health of the mobs that stay in the stack, negative when not known. */
+	private record Pending(int count, CompoundTag data, float restHealth) {
 	}
 
-	private static void remember(Mob mob) {
-		pending.put(mob, new Pending(count(mob), MinecraftCompat.saveEntity(mob)));
+	private static void remember(Mob mob, float restHealth) {
+		pending.put(mob, new Pending(count(mob), MinecraftCompat.saveEntity(mob), restHealth));
 	}
 
-	/** Adds a copy of the mob, made from its data from before, holding {@code count} mobs. */
-	private static void spawnRest(Mob mob, CompoundTag data, int count) {
+	/**
+	 * Adds a copy of the mob, made from its data from before, holding {@code count} mobs, with
+	 * {@code health} (the saved health when it is not positive).
+	 */
+	private static void spawnRest(Mob mob, CompoundTag data, int count, float health) {
 		if (count < 1 || !(mob.level() instanceof ServerLevel level)) {
 			return;
+		}
+		if (health > 0) {
+			data.putFloat("Health", health);
 		}
 		data.remove("UUID");
 		data.remove("carriedBlockState");
@@ -498,10 +637,11 @@ public final class EntityStacker {
 			}
 			for (Mob stack : stacks) {
 				int count = count(stack);
+				float restHealth = restHealth(stack, stack.getHealth());
 				setCount(stack, 1);
 				CompoundTag data = MinecraftCompat.saveEntity(stack);
 				for (int i = 1; i < count; i++) {
-					spawnRest(stack, data.copy(), 1);
+					spawnRest(stack, data.copy(), 1, restHealth);
 					added++;
 				}
 			}
@@ -535,6 +675,8 @@ public final class EntityStacker {
 		groups.clear();
 		excluded.clear();
 		pending.clear();
+		frontDamage.clear();
+		hitStart.clear();
 		mergesTotal = 0;
 	}
 }

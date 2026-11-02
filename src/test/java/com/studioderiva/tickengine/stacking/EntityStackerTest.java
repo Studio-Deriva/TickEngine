@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.network.chat.Component;
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +37,49 @@ class EntityStackerTest {
 	@Test
 	void mobsThatDifferOnlyInPositionHealthAndTimersMatch() {
 		assertEquals(EntityStacker.signature(sheep((byte) 0, false, 8, 1)), EntityStacker.signature(sheep((byte) 0, false, 3, 5)));
+	}
+
+	private static ListTag tags(String... names) {
+		ListTag list = new ListTag();
+		for (String name : names) {
+			list.add(StringTag.valueOf(name));
+		}
+		return list;
+	}
+
+	@Test
+	void scoreboardTagsMustMatchButNotTheCount() {
+		CompoundTag plain = sheep((byte) 0, false, 8, 0);
+		plain.put("Tags", tags(EntityStacker.TAG_PREFIX + "4"));
+		CompoundTag single = sheep((byte) 0, false, 8, 0);
+		assertEquals(EntityStacker.signature(single), EntityStacker.signature(plain), "the count tag is not compared");
+
+		CompoundTag tagged = sheep((byte) 0, false, 8, 0);
+		tagged.put("Tags", tags("arena", EntityStacker.TAG_PREFIX + "2"));
+		assertNotEquals(EntityStacker.signature(sheep((byte) 0, false, 8, 0)), EntityStacker.signature(tagged));
+
+		CompoundTag sameTags = sheep((byte) 0, false, 8, 0);
+		sameTags.put("Tags", tags("team.red", "arena"));
+		CompoundTag reordered = sheep((byte) 0, false, 8, 0);
+		reordered.put("Tags", tags("arena", "team.red"));
+		assertEquals(EntityStacker.signature(sameTags), EntityStacker.signature(reordered), "order does not matter");
+	}
+
+	@Test
+	void chickensWithDifferentEggTimersMatch() {
+		CompoundTag first = new CompoundTag();
+		first.putString("id", "minecraft:chicken");
+		first.putInt("EggLayTime", 6100);
+		CompoundTag second = first.copy();
+		second.putInt("EggLayTime", 11900);
+		assertEquals(EntityStacker.signature(first), EntityStacker.signature(second));
+	}
+
+	@Test
+	void invulnerableMobsStayApart() {
+		CompoundTag invulnerable = sheep((byte) 0, false, 8, 0);
+		invulnerable.putBoolean("Invulnerable", true);
+		assertNotEquals(EntityStacker.signature(sheep((byte) 0, false, 8, 0)), EntityStacker.signature(invulnerable));
 	}
 
 	@Test

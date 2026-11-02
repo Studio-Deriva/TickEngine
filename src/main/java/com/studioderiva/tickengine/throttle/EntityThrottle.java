@@ -186,6 +186,10 @@ public final class EntityThrottle {
 			return true;
 		}
 		if (entity instanceof LivingEntity living) {
+			// A dying mob lies there for 20 ticks before it vanishes; throttled, it would lie there longer.
+			if (living.isDeadOrDying()) {
+				return true;
+			}
 			if (TickEngineConfig.excludeCombat && inCombat(living)) {
 				return true;
 			}

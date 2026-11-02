@@ -49,8 +49,9 @@ import net.minecraft.world.level.Level;
  * report, without the length limit of a link, is written to a text file to attach to the issue.
  *
  * <p>The report holds versions, TickEngine's settings, the rule that applies to the target, profiler
- * numbers and the mod list. It never holds player names, addresses or coordinates; the only path in it
- * is the output.reportDirectory setting, which is relative to the server folder.
+ * numbers and the mod list. It never holds player names, addresses or coordinates (the address settings
+ * show only whether they were changed); the only path in it is the output.reportDirectory setting, which
+ * is relative to the server folder.
  */
 public final class DiagnosticReport {
 	/** What the problem is about. */
@@ -484,7 +485,7 @@ public final class DiagnosticReport {
 	private static Section changedSettings() {
 		List<String> lines = new ArrayList<>();
 		TickEngineConfig.options().values().stream().filter(option -> !option.isDefault())
-			.forEach(option -> lines.add(option.key + " = " + option.format() + " (default " + option.defaultText() + ")"));
+			.forEach(option -> lines.add(option.key + " = " + shown(option) + " (default " + option.defaultText() + ")"));
 		if (lines.isEmpty()) {
 			lines.add("all settings have their default value");
 		}
@@ -493,8 +494,13 @@ public final class DiagnosticReport {
 
 	private static Section allSettings() {
 		List<String> lines = new ArrayList<>();
-		TickEngineConfig.options().values().forEach(option -> lines.add(option.key + " = " + option.format()));
+		TickEngineConfig.options().values().forEach(option -> lines.add(option.key + " = " + shown(option)));
 		return Section.code("All settings", lines);
+	}
+
+	/** An option's value as the report shows it: an address the admin set is hidden, since reports get posted publicly. */
+	static String shown(TickEngineConfig.Option<?> option) {
+		return option.isSensitive() && !option.isDefault() ? "(set, hidden)" : option.format();
 	}
 
 	private static Section allRules() {

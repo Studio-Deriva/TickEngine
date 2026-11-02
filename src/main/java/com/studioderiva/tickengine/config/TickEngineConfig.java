@@ -13,8 +13,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -41,7 +43,7 @@ public final class TickEngineConfig {
 	// --- output ---
 	public static int chatTopEntries = 10;
 	public static String reportDirectory = "tickengine/reports";
-	public static boolean webServer = true;
+	public static boolean webServer = false;
 	public static int webPort = 8765;
 	public static String webBindAddress = "0.0.0.0";
 	public static String webPublicAddress = "auto";
@@ -200,9 +202,9 @@ public final class TickEngineConfig {
 				+ "Must stay inside the server folder.",
 			() -> reportDirectory, v -> reportDirectory = v, TickEngineConfig::checkReportDirectory));
 		register(Option.bool("output.webServer",
-			"Small built-in web server that shows HTML reports in the browser: the path in chat becomes a\n"
-				+ "link to click. It serves only the HTML reports, each behind a secret link. The port must be\n"
-				+ "reachable from your PC (on a hosting panel, add it as an extra port).",
+			"Off by default: it opens a port. Small built-in web server that shows HTML reports in the browser:\n"
+				+ "the path in chat becomes a link to click. It serves only the HTML reports, each behind a secret\n"
+				+ "link. The port must be reachable from your PC (on a hosting panel, add it as an extra port).",
 			() -> webServer, v -> webServer = v));
 		register(Option.integer("output.webPort",
 			"Port of the report web server. Range: 1024-65535.",
@@ -210,11 +212,11 @@ public final class TickEngineConfig {
 		register(Option.string("output.webBindAddress",
 			"Address the report web server listens on. 0.0.0.0 = every network interface,\n"
 				+ "127.0.0.1 = only this machine.",
-			() -> webBindAddress, v -> webBindAddress = v.trim(), value -> null));
+			() -> webBindAddress, v -> webBindAddress = v.trim(), value -> null).sensitive());
 		register(Option.string("output.webPublicAddress",
 			"Host name or IP put in report links, e.g. play.example.com. \"auto\" uses 'server-ip' from\n"
 				+ "server.properties, or else the address the player reached the server on.",
-			() -> webPublicAddress, v -> webPublicAddress = v.trim(), TickEngineConfig::checkPublicAddress));
+			() -> webPublicAddress, v -> webPublicAddress = v.trim(), TickEngineConfig::checkPublicAddress).sensitive());
 		register(Option.integer("permissions.commandOpLevel",
 			"Operator level required for /tickengine when no permissions mod (e.g. LuckPerms) is installed.\n"
 				+ "With LuckPerms use the nodes tickengine.status, tickengine.top, tickengine.profile,\n"
@@ -471,9 +473,9 @@ public final class TickEngineConfig {
 			"The limit stops trial spawners (trial chambers).",
 			() -> limitTrialSpawners, v -> limitTrialSpawners = v));
 		register(Option.bool("entityLimit.breeding",
-			"The limit stops breeding: animals and villagers making babies, and chicks hatching from thrown\n"
-				+ "eggs (chicken farms with dispensers). Animals that fail to breed lose their love mode;\n"
-				+ "villagers wait as if they had bred.",
+			"The limit stops breeding: animals and villagers making babies (frogs, sniffers and turtles their\n"
+				+ "eggs), and chicks hatching from thrown eggs (chicken farms with dispensers). Animals that fail to\n"
+				+ "breed lose their love mode; villagers wait as if they had bred.",
 			() -> limitBreeding, v -> limitBreeding = v));
 
 		register(Option.bool("history.enabled",
@@ -572,18 +574,25 @@ public final class TickEngineConfig {
 
 	/** Returns an error message when options are inconsistent with each other, or null when they are valid. */
 	public static String checkConsistency() {
+		List<String> problems = inconsistencies();
+		return problems.isEmpty() ? null : problems.get(0);
+	}
+
+	/** Every way the options are inconsistent with each other right now; empty when they are valid. */
+	public static List<String> inconsistencies() {
+		List<String> problems = new ArrayList<>();
 		if (lowerBelowMspt >= raiseAboveMspt) {
-			return "autoTuning.lowerBelowMspt (" + lowerBelowMspt + ") must be below autoTuning.raiseAboveMspt ("
-				+ raiseAboveMspt + "). Auto-tuning will not relax until this is fixed.";
+			problems.add("autoTuning.lowerBelowMspt (" + lowerBelowMspt + ") must be below autoTuning.raiseAboveMspt ("
+				+ raiseAboveMspt + "). Auto-tuning will not relax until this is fixed.");
 		}
 		if (emergencyExitMspt >= emergencyTriggerMspt) {
-			return "emergency.exitMspt (" + emergencyExitMspt + ") must be below emergency.triggerMspt ("
-				+ emergencyTriggerMspt + "). Until this is fixed, emergency mode ends below triggerMspt.";
+			problems.add("emergency.exitMspt (" + emergencyExitMspt + ") must be below emergency.triggerMspt ("
+				+ emergencyTriggerMspt + "). Until this is fixed, emergency mode ends below triggerMspt.");
 		}
 		if (emergencyMemoryPercent > 0 && emergencyMemoryPercent < 50) {
-			return "emergency.memoryPercent must be 0 (off) or between 50 and 99.";
+			problems.add("emergency.memoryPercent must be 0 (off) or between 50 and 99.");
 		}
-		return null;
+		return problems;
 	}
 
 	/**
@@ -731,6 +740,8 @@ public final class TickEngineConfig {
 		private String safeValue = "false";
 		/** The value before any config file or command changed it. */
 		private String defaultText;
+		/** Says where the server can be reached: left out of reports that get posted publicly. */
+		private boolean sensitive;
 
 		private Option(String key, String comment, Supplier<T> getter, Consumer<T> setter,
 			Function<String, T> parser, Function<T, String> validator) {
@@ -778,6 +789,15 @@ public final class TickEngineConfig {
 				}
 				return null;
 			}, value -> null);
+		}
+
+		Option<T> sensitive() {
+			sensitive = true;
+			return this;
+		}
+
+		public boolean isSensitive() {
+			return sensitive;
 		}
 
 		Option<T> confirmedBy(String command) {

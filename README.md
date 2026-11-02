@@ -137,11 +137,11 @@ bytecode, but not yet run on a server.
   chunks appear late and makes the server wait when it needs one. With mods that move chunk work off
   the server thread (C2ME), the chunk rows may be partly empty: TickEngine only counts the server thread.
 - **Reports in the browser.** The chat line of a saved HTML report has an `[open in browser]` link,
-  served by a small built-in web server (`output.webServer`, port `output.webPort`, default 8765). It
-  serves only the HTML reports, each at a secret link, and nothing else. Links use
-  `output.webPublicAddress` (for example `play.example.com`); with the default `auto` they use `server-ip`
-  from `server.properties`, or else the address the player typed to join. On a hosting panel, add the
-  port as an extra port, or set `output.webServer` to false to keep the port closed.
+  served by a small built-in web server. It is off by default, since it opens a port: turn it on with
+  `/tickengine config set output.webServer true` (port `output.webPort`, default 8765). It serves only
+  the HTML reports, each at a secret link, and nothing else. Links use `output.webPublicAddress` (for
+  example `play.example.com`); with the default `auto` they use `server-ip` from `server.properties`, or
+  else the address the player typed to join. On a hosting panel, add the port as an extra port.
 
 ## History
 
@@ -352,7 +352,8 @@ on, after explaining the risks and asking for `/tickengine stacking confirm I un
 blocks per side (the grid moves by half a cube every other second, so mobs on a cube edge meet too);
 inside a cube, mobs whose saved data is the same stack together. Position, health,
 timers and similar values are ignored; everything else must match, modded data included: a red and a
-white sheep, a sheared and a woolly one, two horses with different stats never stack. The work is
+white sheep, a sheared and a woolly one, two horses with different stats, two mobs with different
+scoreboard tags never stack. The work is
 spread over several ticks with a time limit per tick, so even thousands of mobs never make one long
 tick.
 
@@ -363,10 +364,14 @@ wandering traders by default, for their trades). Change the list with `/tickengi
 **How a stack behaves.**
 
 - Killing it kills one mob at a time, with its own loot and XP; the rest stays as a stack. Farms give
-  the same as without stacking. `/kill` removes the whole stack.
+  the same as without stacking. What hit every mob of the stack (a fall, lava, cramming, an explosion)
+  stays on the rest: in a farm that kills by falling the next mob takes the same fall, and in one that
+  leaves mobs at half a heart the rest stays at half a heart. An attack hit only the mob that died.
+  `/kill` removes the whole stack.
 - Using it in a way that does something (feeding, shearing, dyeing, a name tag, a lead, a spawn egg, a
   bucket) separates the mob you clicked; the rest stays a stack. So feeding a stack of cows breeds them
-  as usual, and a bucket takes one fish.
+  as usual, and a bucket takes one fish. A dispenser with shears shears one mob too.
+- A stack of chickens lays as many eggs as its chickens would.
 - What a stack picks up (an item, a block for an enderman) belongs to one mob: it drops once, and the
   mobs that come out of the stack when it is killed, used or unstacked do not carry it. Mobs already
   holding something they picked up never stack.
@@ -377,7 +382,8 @@ wandering traders by default, for their trades). Change the list with `/tickengi
   and survives restarts.
 
 **The risks.** A stack moves, thinks and despawns as one mob: ten zombies become one zombie with ten
-lives, and mobs that produce something over time (wool regrowth, for example) produce for one. Mods
+lives, and mobs that produce something over time (wool regrowth, honey, armadillo scutes; eggs are the
+exception) produce for one. Mods
 that keep their own data about single mobs may not expect the copies made when a stack is killed or
 used. If you remove TickEngine, each stack stays one single mob: run `/tickengine stacking unstack`
 first, which splits every loaded stack back into single mobs.
@@ -389,9 +395,9 @@ type, new mobs of that type stop appearing there until some die or leave:
 
 - natural spawning (`entityLimit.naturalSpawning`), monster spawners (`entityLimit.spawners`; a spawner
   at the limit waits its normal delay and tries again) and trial spawners (`entityLimit.trialSpawners`);
-- breeding (`entityLimit.breeding`): two animals in love make no baby and lose their love mode,
-  villagers make no child and wait as if they had bred, and thrown eggs (chicken farms with dispensers)
-  hatch no chicks.
+- breeding (`entityLimit.breeding`): two animals in love make no baby and lose their love mode (frogs,
+  sniffers and turtles make no egg), villagers make no child and wait as if they had bred, and thrown
+  eggs (chicken farms with dispensers) hatch no chicks.
 
 Each source can be turned off on its own. Nothing already in the chunk is removed, a stack counts as one
 mob, and spawn eggs, dispensers placing mobs and commands are never stopped. Rules give a type or a whole
@@ -400,9 +406,8 @@ mod its own limit (`/tickengine limit rules set 32 minecraft:chicken`, also per 
 times each source was stopped and where the last one was.
 
 Counted are the loaded mobs of the type in the whole height of the chunk. Breeding is checked for the
-parents' type, so the rare babies of another type (a mule) count as their parents. Animals that make
-their babies another way (turtles, frogs and sniffers lay eggs, foxes breed through their own code) are
-not stopped.
+parents' type, so the rare babies of another type (a mule) count as their parents, and so do the eggs
+of frogs, sniffers and turtles. Eggs already laid still hatch.
 
 ## Configuration
 
@@ -412,7 +417,7 @@ ones:
 ```jsonc
 {
   "profiler":      { "enabled": true, "sampleEveryTicks": 20, "windowSeconds": 60 },
-  "output":        { "reportDirectory": "tickengine/reports", "webServer": true, "webPort": 8765,
+  "output":        { "reportDirectory": "tickengine/reports", "webServer": false, "webPort": 8765,
                      "webPublicAddress": "auto" },
   "blockEntities": { "enabled": true, "activeRadiusChunks": 4, "defaultInterval": 4,
                      "forcedChunkMaxInterval": 2, "rules": { "minecraft:piston": 1 } },
@@ -486,7 +491,8 @@ going wrong and press Submit. A file with the full report (the link has to stay 
 part of the mod list) is written to `tickengine/reports/` to attach to the issue.
 
 TickEngine sends nothing itself, so you can read everything before it is posted. The report has no
-player names, IP addresses or coordinates; the only path in it is the `output.reportDirectory` setting,
+player names, IP addresses or coordinates (`output.webPublicAddress` and `output.webBindAddress` show
+only "(set, hidden)"); the only path in it is the `output.reportDirectory` setting,
 relative to the server folder. From the server console the command prints the address of the new-issue
 page and the file instead of a clickable link; there the file is the whole report, so attach or paste it.
 
